@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, createContext, useContext } from 'react';
 
 // --- Spotify API Configuration ---
-const REDIRECT_URI = 'https://localhost:5173/callback'; // Using a static URI as requested
+const REDIRECT_URI = window.location.origin; // Using a static URI as requested
 const AUTH_ENDPOINT = "https://accounts.spotify.com/authorize";
 const RESPONSE_TYPE = "token";
 const SCOPES = [
