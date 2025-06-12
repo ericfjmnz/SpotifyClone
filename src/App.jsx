@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, createContext, useContext } fr
 // --- Spotify API Configuration ---
 const REDIRECT_URI = window.location.origin; 
 const AUTH_ENDPOINT = "https://accounts.spotify.com/authorize";
-const RESPONSE_TYPE = "token";
+const TOKEN_ENDPOINT = "https://accounts.spotify.com/api/token";
 const SCOPES = [
     "user-read-private",
     "user-read-email",
@@ -18,38 +18,67 @@ const SCOPES = [
 // --- React Context for State Management ---
 const AppContext = createContext();
 
+// --- PKCE Helper Functions ---
+
+// Creates a high-entropy random string for the code verifier
+function generateCodeVerifier(length) {
+    let text = '';
+    let possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+    for (let i = 0; i < length; i++) {
+        text += possible.charAt(Math.floor(Math.random() * possible.length));
+    }
+    return text;
+}
+
+// Hashes the code verifier to create the code challenge
+async function generateCodeChallenge(codeVerifier) {
+    const data = new TextEncoder().encode(codeVerifier);
+    const digest = await window.crypto.subtle.digest('SHA-256', data);
+    return btoa(String.fromCharCode.apply(null, [...new Uint8Array(digest)]))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+}
+
 // --- Login Screen Component ---
 function LoginScreen() {
     const [clientId, setClientId] = useState("");
     const [loginError, setLoginError] = useState("");
     const [copied, setCopied] = useState(false);
     
-    // Check for login errors from Spotify in the URL hash
     useEffect(() => {
-        const hash = window.location.hash;
-        if (hash) {
-            const params = new URLSearchParams(hash.substring(1));
-            const error = params.get("error");
-            if (error) {
-                setLoginError(`Spotify returned an error: ${error}. Please check your Client ID and ensure the Redirect URI is correct in your Spotify Dashboard.`);
-                // Clear the hash from the URL so we don't see the error message on refresh
-                window.history.replaceState(null, null, ' ');
-            }
-        }
-
         const storedClientId = window.localStorage.getItem("spotify_client_id");
         if (storedClientId) {
             setClientId(storedClientId);
         }
+
+        const params = new URLSearchParams(window.location.search);
+        const error = params.get("error");
+        if (error) {
+            setLoginError(`Spotify returned an error: "${error}". Please ensure your Redirect URI is correctly set in your dashboard.`);
+        }
     }, []);
 
-    const handleLogin = (e) => {
+    const handleLogin = async (e) => {
         e.preventDefault();
         if (clientId) {
             setLoginError("");
             window.localStorage.setItem("spotify_client_id", clientId);
-            const loginUrl = `${AUTH_ENDPOINT}?client_id=${clientId}&redirect_uri=${REDIRECT_URI}&scope=${SCOPES}&response_type=${RESPONSE_TYPE}&show_dialog=true`;
-            window.location.href = loginUrl;
+
+            const verifier = generateCodeVerifier(128);
+            window.localStorage.setItem("code_verifier", verifier);
+            const challenge = await generateCodeChallenge(verifier);
+
+            const params = new URLSearchParams();
+            params.append("client_id", clientId);
+            params.append("response_type", "code");
+            params.append("redirect_uri", REDIRECT_URI);
+            params.append("scope", SCOPES);
+            params.append("code_challenge_method", "S256");
+            params.append("code_challenge", challenge);
+
+            document.location = `${AUTH_ENDPOINT}?${params.toString()}`;
+
         } else {
             setLoginError("Please enter a valid Spotify Client ID.");
         }
@@ -114,57 +143,89 @@ function LoginScreen() {
 
 // --- Main App Component ---
 export default function App() {
-    const [token, setToken] = useState("");
-    const [experienceMode, setExperienceMode] = useState('normal'); // Simplified state
-    const [view, setView] = useState('home'); // home, curator, search, authorized
+    const [token, setToken] = useState(null);
+    const [isLoading, setIsLoading] = useState(true);
+    const [experienceMode, setExperienceMode] = useState('normal'); 
+    const [view, setView] = useState('home'); 
 
-    // Spotify Token Handler
     useEffect(() => {
-        const hash = window.location.hash;
-        let localToken = window.localStorage.getItem("spotify_token");
-        let isNewLogin = false;
+        const clientId = window.localStorage.getItem("spotify_client_id");
+        const params = new URLSearchParams(window.location.search);
+        const code = params.get("code");
 
-        if (!localToken && hash) {
-            const params = new URLSearchParams(hash.substring(1));
-            const parsedToken = params.get("access_token");
+        const getToken = async (authCode) => {
+            const verifier = window.localStorage.getItem("code_verifier");
 
-            if (parsedToken) {
-                window.history.replaceState(null, null, ' ');
-                window.localStorage.setItem("spotify_token", parsedToken);
-                localToken = parsedToken; 
-                isNewLogin = true;
+            const params = new URLSearchParams();
+            params.append("client_id", clientId);
+            params.append("grant_type", "authorization_code");
+            params.append("code", authCode);
+            params.append("redirect_uri", REDIRECT_URI);
+            params.append("code_verifier", verifier);
+
+            try {
+                const result = await fetch(TOKEN_ENDPOINT, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                    body: params
+                });
+
+                if (!result.ok) {
+                    throw new Error(`HTTP error! status: ${result.status}`);
+                }
+
+                const { access_token } = await result.json();
+                window.localStorage.setItem("spotify_token", access_token);
+                setToken(access_token);
+                // Clear URL params after getting token
+                window.history.replaceState(null, null, window.location.pathname);
+            } catch (error) {
+                console.error("Error fetching token:", error);
+                // Clear bad token/verifier data
+                window.localStorage.removeItem("spotify_token");
+                window.localStorage.removeItem("code_verifier");
+            } finally {
+                setIsLoading(false);
             }
-        }
-        setToken(localToken);
+        };
 
-        if (isNewLogin) {
-            setView('authorized');
+        if (code) {
+             getToken(code);
+        } else {
+             const storedToken = window.localStorage.getItem("spotify_token");
+             if (storedToken) {
+                 setToken(storedToken);
+             }
+             setIsLoading(false);
         }
+
     }, []);
 
     const logout = () => {
-        setToken("");
+        setToken(null);
         window.localStorage.removeItem("spotify_token");
         window.localStorage.removeItem("spotify_client_id");
+        window.localStorage.removeItem("code_verifier");
+        window.history.replaceState(null, null, window.location.pathname);
         setView('home');
     };
     
+    if (isLoading) {
+        return <div className="h-screen w-full flex items-center justify-center bg-black text-white"><p>Loading...</p></div>;
+    }
+
     if (!token) {
         return <LoginScreen />;
     }
 
     return (
         <AppContext.Provider value={{ token, experienceMode, setExperienceMode, view, setView }}>
-            {view === 'authorized' ? (
-                <WelcomePage />
-            ) : (
-                <div className="h-screen w-full flex flex-col bg-black text-white">
-                    <div className="flex flex-1 overflow-hidden">
-                        <Sidebar logout={logout} />
-                        <MainContent />
-                    </div>
+            <div className="h-screen w-full flex flex-col bg-black text-white">
+                <div className="flex flex-1 overflow-hidden">
+                    <Sidebar logout={logout} />
+                    <MainContent />
                 </div>
-            )}
+            </div>
         </AppContext.Provider>
     );
 }
@@ -190,7 +251,7 @@ function Sidebar({ logout }) {
             <ul className="space-y-2">
                 <NavItem label="Home" targetView="home" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>} />
                 <NavItem label="Playlist Curator" targetView="curator" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h7" /></svg>}/>
-                <NavItem label="Search" targetView="search" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>} />
+                <NavItem label="Search" targetView="search" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>} />
             </ul>
             <div className="flex-grow"></div>
             <button onClick={logout} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-full transition duration-300">
@@ -213,25 +274,6 @@ function MainContent() {
 }
 
 // --- View Components ---
-
-function WelcomePage() {
-    const { setView } = useContext(AppContext);
-
-    return (
-        <div className="h-screen w-full flex items-center justify-center bg-gray-900 text-white p-4">
-            <div className="text-center bg-gray-800 p-12 rounded-lg shadow-2xl animate-fade-in-up">
-                <h1 className="text-4xl font-bold mb-4">Authorization Successful!</h1>
-                <p className="text-gray-300 mb-8">You've successfully connected your Spotify account.</p>
-                <button 
-                    onClick={() => setView('home')} 
-                    className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-full transition duration-300 transform hover:scale-105"
-                >
-                    Enter the App
-                </button>
-            </div>
-        </div>
-    );
-}
 
 function HomePage() {
     const { experienceMode, setExperienceMode } = useContext(AppContext);
