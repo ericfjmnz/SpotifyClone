@@ -262,7 +262,7 @@ function MainContent() {
     const { view } = useContext(AppContext);
     
     return (
-        <main className="flex-1 bg-gradient-to-b from-gray-900 via-black to-black p-8 overflow-y-auto">
+        <main className="flex-1 bg-gradient-to-b from-gray-800 to-black p-6 md:p-8 overflow-y-auto">
             {view === 'home' && <HomePage />}
             {view === 'curator' && <PlaylistCurator />}
             {view === 'search' && <div className="text-center"><h1 className="text-3xl font-bold">Search</h1><p className="text-gray-400">Search functionality coming soon!</p></div>}
@@ -310,24 +310,39 @@ const useSpotifyApi = (url) => {
 
 // --- View Components ---
 
-function HomePage() {
-    const { experienceMode, setExperienceMode } = useContext(AppContext);
-
+function ContentSection({ title, children }) {
     return (
-        <div>
-            {/* Experience mode switcher can be kept or removed depending on final design */}
-            {/* For this example, we'll hide it to focus on the Spotify look */}
-            {experienceMode === 'beginner' && <BeginnerView />}
-            {experienceMode === 'normal' && <NormalView />}
-            {experienceMode === 'expert' && <ExpertView />}
+        <section>
+            <div className="flex justify-between items-center mb-4">
+                <h2 className="text-2xl font-bold hover:underline cursor-pointer">{title}</h2>
+                <span className="text-sm font-bold text-gray-400 hover:underline cursor-pointer">Show all</span>
+            </div>
+            {children}
+        </section>
+    );
+}
+
+function PlaylistCard({ imageUrl, title, subtitle }) {
+    return (
+        <div className="bg-[#181818] p-4 rounded-lg hover:bg-[#282828] transition-colors duration-300 group cursor-pointer">
+            <div className="relative mb-4">
+                <img src={imageUrl || 'https://placehold.co/300x300/181818/FFFFFF?text=...'} alt={title} className="w-full h-auto rounded-md shadow-lg"/>
+                <div className="absolute bottom-2 right-2 w-12 h-12 bg-green-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 group-hover:bottom-4 transition-all duration-300 shadow-xl">
+                    <svg className="w-6 h-6 text-black" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                </div>
+            </div>
+            <h3 className="font-bold truncate">{title}</h3>
+            <p className="text-sm text-gray-400 truncate">{subtitle}</p>
         </div>
     );
 }
 
-function NormalView() {
+
+function HomePage() {
     const { data: profile, loading: profileLoading } = useSpotifyApi('/me');
-    const { data: recent, loading: recentLoading } = useSpotifyApi('/me/player/recently-played?limit=6');
+    const { data: featuredPlaylistsData, loading: playlistsLoading } = useSpotifyApi('/browse/featured-playlists?limit=5');
     const { data: topArtists, loading: artistsLoading } = useSpotifyApi('/me/top/artists?limit=5');
+    const { data: recent, loading: recentLoading } = useSpotifyApi('/me/player/recently-played?limit=6');
 
     const getGreeting = () => {
         const hour = new Date().getHours();
@@ -336,41 +351,56 @@ function NormalView() {
         return "Good evening";
     };
 
-    if (profileLoading || recentLoading || artistsLoading) {
-        return <div className="text-white">Loading your space...</div>;
+    if (profileLoading || playlistsLoading || artistsLoading || recentLoading) {
+        return <div className="text-white text-center p-10">Loading your space...</div>;
     }
 
     return (
         <div className="space-y-12">
             <h1 className="text-3xl font-bold">{getGreeting()}</h1>
 
-            <section>
+             <section>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                     {recent && recent.items.map(({ track }, index) => (
-                       <div key={`${track.id}-${index}`} className="bg-white/10 hover:bg-white/20 transition-colors duration-300 rounded-md flex items-center gap-4 group">
-                           <img src={track.album.images[0]?.url || 'https://placehold.co/80x80/000000/FFFFFF?text=...'} alt={track.name} className="w-20 h-20 rounded-l-md"/>
+                       <div key={`${track.id}-${index}`} className="bg-white/10 hover:bg-white/20 transition-colors duration-300 rounded-md flex items-center gap-4 group cursor-pointer">
+                           <img src={track.album.images[0]?.url || 'https://placehold.co/80x80/181818/FFFFFF?text=...'} alt={track.name} className="w-20 h-20 rounded-l-md"/>
                            <p className="font-semibold text-white flex-1 pr-2">{track.name}</p>
+                           <div className="mr-4 w-10 h-10 bg-green-500 rounded-full items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 shadow-xl hidden sm:flex">
+                              <svg className="w-5 h-5 text-black" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                           </div>
                        </div> 
                     ))}
                 </div>
             </section>
-            
-            <section>
-                <h2 className="text-2xl font-bold mb-4">Your Top Artists</h2>
+
+            <ContentSection title={featuredPlaylistsData?.message || "Featured Playlists"}>
                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
-                    {topArtists && topArtists.items.map(artist => (
-                        <div key={artist.id} className="bg-gray-900/50 p-4 rounded-lg hover:bg-gray-800 transition-colors duration-300 flex flex-col items-center text-center group">
-                            <img src={artist.images[0]?.url} alt={artist.name} className="w-32 h-32 rounded-full mb-4 shadow-lg"/>
-                            <h3 className="font-bold truncate w-full">{artist.name}</h3>
-                            <p className="text-sm text-gray-400">Artist</p>
-                        </div>
+                    {featuredPlaylistsData && featuredPlaylistsData.playlists.items.map(playlist => (
+                       <PlaylistCard 
+                            key={playlist.id} 
+                            imageUrl={playlist.images[0]?.url}
+                            title={playlist.name}
+                            subtitle={playlist.description.replace(/<[^>]*>?/gm, '')} // Remove HTML from description
+                        />
                     ))}
                 </div>
-            </section>
+            </ContentSection>
+
+            <ContentSection title="Your Top Artists">
+                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
+                    {topArtists && topArtists.items.map(artist => (
+                       <PlaylistCard 
+                            key={artist.id} 
+                            imageUrl={artist.images[0]?.url}
+                            title={artist.name}
+                            subtitle="Artist"
+                        />
+                    ))}
+                </div>
+            </ContentSection>
         </div>
     );
 }
-
 
 function PlaylistCurator() {
     return (
@@ -403,17 +433,6 @@ function PlaylistCurator() {
             </div>
         </div>
     );
-}
-
-
-// --- Experience Mode Views (Placeholders) ---
-
-function BeginnerView() {
-    return <div className="p-6 bg-gray-800 rounded-lg"><h3 className="text-2xl font-bold text-green-400">Beginner Mode</h3><p className="text-gray-300 mt-2">Simplified view focused on discovery. Top recommendations and featured playlists will be shown here.</p></div>;
-}
-
-function ExpertView() {
-    return <div className="p-6 bg-gray-800 rounded-lg"><h3 className="text-2xl font-bold text-red-400">Expert Mode</h3><p className="text-gray-300 mt-2">A data-dense view for power users. It will feature detailed listening stats, quick access to tools, and advanced sorting/filtering options for your library.</p></div>;
 }
 
 
