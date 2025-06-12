@@ -12,6 +12,7 @@ const SCOPES = [
     "playlist-modify-private",
     "playlist-read-private",
     "user-top-read",
+    "user-read-recently-played",
 ].join(" ");
 
 
@@ -20,7 +21,6 @@ const AppContext = createContext();
 
 // --- PKCE Helper Functions ---
 
-// Creates a high-entropy random string for the code verifier
 function generateCodeVerifier(length) {
     let text = '';
     let possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
@@ -30,7 +30,6 @@ function generateCodeVerifier(length) {
     return text;
 }
 
-// Hashes the code verifier to create the code challenge
 async function generateCodeChallenge(codeVerifier) {
     const data = new TextEncoder().encode(codeVerifier);
     const digest = await window.crypto.subtle.digest('SHA-256', data);
@@ -177,11 +176,9 @@ export default function App() {
                 const { access_token } = await result.json();
                 window.localStorage.setItem("spotify_token", access_token);
                 setToken(access_token);
-                // Clear URL params after getting token
                 window.history.replaceState(null, null, window.location.pathname);
             } catch (error) {
                 console.error("Error fetching token:", error);
-                // Clear bad token/verifier data
                 window.localStorage.removeItem("spotify_token");
                 window.localStorage.removeItem("code_verifier");
             } finally {
@@ -265,13 +262,51 @@ function MainContent() {
     const { view } = useContext(AppContext);
     
     return (
-        <main className="flex-1 bg-gray-900 p-8 overflow-y-auto">
+        <main className="flex-1 bg-gradient-to-b from-gray-900 via-black to-black p-8 overflow-y-auto">
             {view === 'home' && <HomePage />}
             {view === 'curator' && <PlaylistCurator />}
             {view === 'search' && <div className="text-center"><h1 className="text-3xl font-bold">Search</h1><p className="text-gray-400">Search functionality coming soon!</p></div>}
         </main>
     );
 }
+
+// --- API Fetch Hook ---
+const useSpotifyApi = (url) => {
+    const { token } = useContext(AppContext);
+    const [data, setData] = useState(null);
+    const [error, setError] = useState(null);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchData = async () => {
+            if (!token || !url) {
+                setLoading(false);
+                return;
+            };
+            try {
+                setLoading(true);
+                const response = await fetch(`https://api.spotify.com/v1${url}`, {
+                    headers: {
+                        Authorization: `Bearer ${token}`
+                    }
+                });
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const result = await response.json();
+                setData(result);
+            } catch (e) {
+                setError(e);
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchData();
+    }, [token, url]);
+
+    return { data, error, loading };
+};
+
 
 // --- View Components ---
 
@@ -280,23 +315,62 @@ function HomePage() {
 
     return (
         <div>
-            <h1 className="text-4xl font-bold mb-4">Welcome Back!</h1>
-            <div className="mb-8">
-                <h2 className="text-xl font-semibold mb-3">Choose Your Experience Mode:</h2>
-                <div className="flex space-x-4">
-                    <button onClick={() => setExperienceMode('beginner')} className={`px-4 py-2 rounded-md ${experienceMode === 'beginner' ? 'bg-green-600' : 'bg-gray-700 hover:bg-gray-600'}`}>Beginner</button>
-                    <button onClick={() => setExperienceMode('normal')} className={`px-4 py-2 rounded-md ${experienceMode === 'normal' ? 'bg-green-600' : 'bg-gray-700 hover:bg-gray-600'}`}>Normal</button>
-                    <button onClick={() => setExperienceMode('expert')} className={`px-4 py-2 rounded-md ${experienceMode === 'expert' ? 'bg-green-600' : 'bg-gray-700 hover:bg-gray-600'}`}>Expert</button>
-                </div>
-            </div>
-            
-            {/* Conditional rendering based on experience mode */}
+            {/* Experience mode switcher can be kept or removed depending on final design */}
+            {/* For this example, we'll hide it to focus on the Spotify look */}
             {experienceMode === 'beginner' && <BeginnerView />}
             {experienceMode === 'normal' && <NormalView />}
             {experienceMode === 'expert' && <ExpertView />}
         </div>
     );
 }
+
+function NormalView() {
+    const { data: profile, loading: profileLoading } = useSpotifyApi('/me');
+    const { data: recent, loading: recentLoading } = useSpotifyApi('/me/player/recently-played?limit=6');
+    const { data: topArtists, loading: artistsLoading } = useSpotifyApi('/me/top/artists?limit=5');
+
+    const getGreeting = () => {
+        const hour = new Date().getHours();
+        if (hour < 12) return "Good morning";
+        if (hour < 18) return "Good afternoon";
+        return "Good evening";
+    };
+
+    if (profileLoading || recentLoading || artistsLoading) {
+        return <div className="text-white">Loading your space...</div>;
+    }
+
+    return (
+        <div className="space-y-12">
+            <h1 className="text-3xl font-bold">{getGreeting()}</h1>
+
+            <section>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    {recent && recent.items.map(({ track }, index) => (
+                       <div key={`${track.id}-${index}`} className="bg-white/10 hover:bg-white/20 transition-colors duration-300 rounded-md flex items-center gap-4 group">
+                           <img src={track.album.images[0]?.url || 'https://placehold.co/80x80/000000/FFFFFF?text=...'} alt={track.name} className="w-20 h-20 rounded-l-md"/>
+                           <p className="font-semibold text-white flex-1 pr-2">{track.name}</p>
+                       </div> 
+                    ))}
+                </div>
+            </section>
+            
+            <section>
+                <h2 className="text-2xl font-bold mb-4">Your Top Artists</h2>
+                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
+                    {topArtists && topArtists.items.map(artist => (
+                        <div key={artist.id} className="bg-gray-900/50 p-4 rounded-lg hover:bg-gray-800 transition-colors duration-300 flex flex-col items-center text-center group">
+                            <img src={artist.images[0]?.url} alt={artist.name} className="w-32 h-32 rounded-full mb-4 shadow-lg"/>
+                            <h3 className="font-bold truncate w-full">{artist.name}</h3>
+                            <p className="text-sm text-gray-400">Artist</p>
+                        </div>
+                    ))}
+                </div>
+            </section>
+        </div>
+    );
+}
+
 
 function PlaylistCurator() {
     return (
@@ -336,10 +410,6 @@ function PlaylistCurator() {
 
 function BeginnerView() {
     return <div className="p-6 bg-gray-800 rounded-lg"><h3 className="text-2xl font-bold text-green-400">Beginner Mode</h3><p className="text-gray-300 mt-2">Simplified view focused on discovery. Top recommendations and featured playlists will be shown here.</p></div>;
-}
-
-function NormalView() {
-    return <div className="p-6 bg-gray-800 rounded-lg"><h3 className="text-2xl font-bold text-blue-400">Normal Mode</h3><p className="text-gray-300 mt-2">A balanced dashboard with your recent activity, new releases, and personalized suggestions.</p></div>;
 }
 
 function ExpertView() {
