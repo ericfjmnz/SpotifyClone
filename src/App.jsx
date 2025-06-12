@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, createContext, useContext } from 'react';
 
 // --- Spotify API Configuration ---
-const REDIRECT_URI = window.location.origin; // Using a static URI as requested
+const REDIRECT_URI = window.location.origin; 
 const AUTH_ENDPOINT = "https://accounts.spotify.com/authorize";
 const RESPONSE_TYPE = "token";
 const SCOPES = [
@@ -24,7 +24,19 @@ function LoginScreen() {
     const [loginError, setLoginError] = useState("");
     const [copied, setCopied] = useState(false);
     
+    // Check for login errors from Spotify in the URL hash
     useEffect(() => {
+        const hash = window.location.hash;
+        if (hash) {
+            const params = new URLSearchParams(hash.substring(1));
+            const error = params.get("error");
+            if (error) {
+                setLoginError(`Spotify returned an error: ${error}. Please check your Client ID and ensure the Redirect URI is correct in your Spotify Dashboard.`);
+                // Clear the hash from the URL so we don't see the error message on refresh
+                window.history.replaceState(null, null, ' ');
+            }
+        }
+
         const storedClientId = window.localStorage.getItem("spotify_client_id");
         if (storedClientId) {
             setClientId(storedClientId);
@@ -68,12 +80,12 @@ function LoginScreen() {
                 <div className="bg-gray-900 p-4 rounded-lg mb-6 text-left">
                     <label className="text-sm font-semibold text-gray-300">Your Redirect URI:</label>
                     <div className="flex items-center justify-between mt-2">
-                        <code className="text-green-400 bg-black p-2 rounded-md text-sm">{REDIRECT_URI}</code>
+                        <code className="text-green-400 bg-black p-2 rounded-md text-sm break-all">{REDIRECT_URI}</code>
                         <button onClick={copyToClipboard} className={`ml-4 px-4 py-2 text-sm font-semibold rounded-md transition-colors ${copied ? 'bg-green-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
                             {copied ? 'Copied!' : 'Copy'}
                         </button>
                     </div>
-                    <p className="text-xs text-gray-500 mt-3">Copy this URI and paste it into the "Redirect URIs" field in your Spotify app's settings.</p>
+                    <p className="text-xs text-gray-500 mt-3">Copy this exact URI and paste it into the "Redirect URIs" field in your Spotify app's settings.</p>
                 </div>
                 
                 <p className="text-gray-400 mb-4">Once configured, enter your Client ID below to log in.</p>
@@ -89,7 +101,7 @@ function LoginScreen() {
                         }}
                         className="p-3 bg-gray-700 rounded-md border border-gray-600 focus:outline-none focus:ring-2 focus:ring-green-500"
                     />
-                    {loginError && <p className="text-red-400 text-sm">{loginError}</p>}
+                    {loginError && <p className="text-red-400 text-sm bg-red-900 bg-opacity-30 p-3 rounded-md">{loginError}</p>}
                     <button type="submit" className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-full transition duration-300 transform hover:scale-105">
                         Login with Spotify
                     </button>
@@ -113,17 +125,14 @@ export default function App() {
         let isNewLogin = false;
 
         if (!localToken && hash) {
-            const parsedToken = hash.substring(1).split("&").find(elem => elem.startsWith("access_token"))?.split("=")[1];
-            const spotifyError = new URLSearchParams(hash.substring(1)).get('error');
+            const params = new URLSearchParams(hash.substring(1));
+            const parsedToken = params.get("access_token");
 
             if (parsedToken) {
-                window.location.hash = "";
+                window.history.replaceState(null, null, ' ');
                 window.localStorage.setItem("spotify_token", parsedToken);
                 localToken = parsedToken; 
                 isNewLogin = true;
-            } else if (spotifyError) {
-                console.error("Spotify login error:", spotifyError);
-                window.location.hash = "";
             }
         }
         setToken(localToken);
@@ -137,7 +146,6 @@ export default function App() {
         setToken("");
         window.localStorage.removeItem("spotify_token");
         window.localStorage.removeItem("spotify_client_id");
-        window.location.hash = "";
         setView('home');
     };
     
@@ -295,4 +303,5 @@ function NormalView() {
 function ExpertView() {
     return <div className="p-6 bg-gray-800 rounded-lg"><h3 className="text-2xl font-bold text-red-400">Expert Mode</h3><p className="text-gray-300 mt-2">A data-dense view for power users. It will feature detailed listening stats, quick access to tools, and advanced sorting/filtering options for your library.</p></div>;
 }
+
 
