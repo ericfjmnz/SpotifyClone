@@ -104,12 +104,13 @@ function LoginScreen() {
 export default function App() {
     const [token, setToken] = useState("");
     const [experienceMode, setExperienceMode] = useState('normal'); // Simplified state
-    const [view, setView] = useState('home'); // home, curator, search
+    const [view, setView] = useState('home'); // home, curator, search, authorized
 
     // Spotify Token Handler
     useEffect(() => {
         const hash = window.location.hash;
         let localToken = window.localStorage.getItem("spotify_token");
+        let isNewLogin = false;
 
         if (!localToken && hash) {
             const parsedToken = hash.substring(1).split("&").find(elem => elem.startsWith("access_token"))?.split("=")[1];
@@ -119,12 +120,17 @@ export default function App() {
                 window.location.hash = "";
                 window.localStorage.setItem("spotify_token", parsedToken);
                 localToken = parsedToken; 
+                isNewLogin = true;
             } else if (spotifyError) {
                 console.error("Spotify login error:", spotifyError);
                 window.location.hash = "";
             }
         }
         setToken(localToken);
+
+        if (isNewLogin) {
+            setView('authorized');
+        }
     }, []);
 
     const logout = () => {
@@ -141,12 +147,16 @@ export default function App() {
 
     return (
         <AppContext.Provider value={{ token, experienceMode, setExperienceMode, view, setView }}>
-            <div className="h-screen w-full flex flex-col bg-black text-white">
-                <div className="flex flex-1 overflow-hidden">
-                    <Sidebar logout={logout} />
-                    <MainContent />
+            {view === 'authorized' ? (
+                <WelcomePage />
+            ) : (
+                <div className="h-screen w-full flex flex-col bg-black text-white">
+                    <div className="flex flex-1 overflow-hidden">
+                        <Sidebar logout={logout} />
+                        <MainContent />
+                    </div>
                 </div>
-            </div>
+            )}
         </AppContext.Provider>
     );
 }
@@ -195,6 +205,25 @@ function MainContent() {
 }
 
 // --- View Components ---
+
+function WelcomePage() {
+    const { setView } = useContext(AppContext);
+
+    return (
+        <div className="h-screen w-full flex items-center justify-center bg-gray-900 text-white p-4">
+            <div className="text-center bg-gray-800 p-12 rounded-lg shadow-2xl animate-fade-in-up">
+                <h1 className="text-4xl font-bold mb-4">Authorization Successful!</h1>
+                <p className="text-gray-300 mb-8">You've successfully connected your Spotify account.</p>
+                <button 
+                    onClick={() => setView('home')} 
+                    className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-full transition duration-300 transform hover:scale-105"
+                >
+                    Enter the App
+                </button>
+            </div>
+        </div>
+    );
+}
 
 function HomePage() {
     const { experienceMode, setExperienceMode } = useContext(AppContext);
