@@ -144,7 +144,6 @@ function LoginScreen() {
 export default function App() {
     const [token, setToken] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
-    const [experienceMode, setExperienceMode] = useState('normal'); 
     const [view, setView] = useState('home'); 
 
     useEffect(() => {
@@ -195,7 +194,6 @@ export default function App() {
              }
              setIsLoading(false);
         }
-
     }, []);
 
     const logout = () => {
@@ -216,12 +214,14 @@ export default function App() {
     }
 
     return (
-        <AppContext.Provider value={{ token, experienceMode, setExperienceMode, view, setView }}>
+        <AppContext.Provider value={{ token, view, setView }}>
             <div className="h-screen w-full flex flex-col bg-black text-white">
-                <div className="flex flex-1 overflow-hidden">
+                <div className="flex flex-1 overflow-y-hidden">
                     <Sidebar logout={logout} />
                     <MainContent />
+                    <RightSidebar />
                 </div>
+                <PlayerBar />
             </div>
         </AppContext.Provider>
     );
@@ -235,7 +235,7 @@ function Sidebar({ logout }) {
     const NavItem = ({ label, targetView, icon }) => (
          <li
             onClick={() => setView(targetView)}
-            className={`flex items-center space-x-4 px-4 py-2 rounded-md cursor-pointer transition-colors duration-200 ${view === targetView ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`}
+            className={`flex items-center space-x-4 px-4 py-2 rounded-md cursor-pointer transition-colors duration-200 ${view === targetView ? 'bg-gray-800 text-white' : 'text-gray-400 hover:text-white'}`}
         >
             {icon}
             <span className="font-semibold">{label}</span>
@@ -243,17 +243,20 @@ function Sidebar({ logout }) {
     );
 
     return (
-        <nav className="w-64 bg-black p-4 flex flex-col space-y-4">
-            <div className="text-2xl font-bold text-white mb-6">Spotify Hub</div>
-            <ul className="space-y-2">
-                <NavItem label="Home" targetView="home" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>} />
-                <NavItem label="Playlist Curator" targetView="curator" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h7" /></svg>}/>
-                <NavItem label="Search" targetView="search" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>} />
-            </ul>
-            <div className="flex-grow"></div>
-            <button onClick={logout} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-full transition duration-300">
-                Logout
-            </button>
+        <nav className="w-64 bg-black p-2 flex-shrink-0 flex flex-col">
+            <div className="bg-[#121212] rounded-lg p-2">
+                 <ul className="space-y-2">
+                    <NavItem label="Home" targetView="home" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="currentColor" viewBox="0 0 16 16"><path d="M8.354 1.146a.5.5 0 0 0-.708 0l-6 6A.5.5 0 0 0 1.5 7.5v7a.5.5 0 0 0 .5.5h4.5a.5.5 0 0 0 .5-.5v-4h2v4a.5.5 0 0 0 .5.5H14a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.146-.354L8.354 1.146zM2.5 14V7.707l5.5-5.5 5.5 5.5V14H10v-4a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 0-.5.5v4H2.5z"/></svg>} />
+                    <NavItem label="Search" targetView="search" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="currentColor" viewBox="0 0 16 16"><path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/></svg>} />
+                </ul>
+            </div>
+            <div className="bg-[#121212] rounded-lg p-2 mt-2 flex-1">
+                 {/* Library Section Placeholder */}
+                 <p className="text-gray-400 p-2">Your Library</p>
+            </div>
+             <div className="mt-auto">
+                 <button onClick={logout} className="w-full text-left text-gray-400 hover:text-white p-4">Logout</button>
+            </div>
         </nav>
     );
 }
@@ -262,13 +265,61 @@ function MainContent() {
     const { view } = useContext(AppContext);
     
     return (
-        <main className="flex-1 bg-gradient-to-b from-gray-800 to-black p-6 md:p-8 overflow-y-auto">
-            {view === 'home' && <HomePage />}
-            {view === 'curator' && <PlaylistCurator />}
-            {view === 'search' && <div className="text-center"><h1 className="text-3xl font-bold">Search</h1><p className="text-gray-400">Search functionality coming soon!</p></div>}
+        <main className="flex-1 bg-gradient-to-b from-gray-800 to-[#121212] overflow-y-auto">
+            <div className="p-6 md:p-8">
+                {view === 'home' && <HomePage />}
+                {view === 'curator' && <PlaylistCurator />}
+                {view === 'search' && <div className="text-center"><h1 className="text-3xl font-bold">Search</h1><p className="text-gray-400">Search functionality coming soon!</p></div>}
+            </div>
         </main>
     );
 }
+
+function RightSidebar() {
+    // Placeholder content matching the screenshot's vibe
+    return (
+        <aside className="w-80 bg-black p-2 flex-shrink-0 hidden lg:flex flex-col">
+            <div className="bg-[#121212] rounded-lg p-4">
+                <h2 className="font-bold text-white mb-4">Now Playing</h2>
+                 <img src="https://i.scdn.co/image/ab67616d0000b273e93a35d3962a4a79c941555c" alt="Album Art" className="w-full rounded-md mb-4"/>
+                <div className="flex justify-between items-center">
+                    <div>
+                        <h3 className="font-bold text-white">I Want To Hold Your Hand</h3>
+                        <p className="text-sm text-gray-400">The Beatles</p>
+                    </div>
+                    <button className="text-gray-400 hover:text-white">+</button>
+                </div>
+            </div>
+        </aside>
+    );
+}
+
+function PlayerBar() {
+    return (
+        <footer className="h-24 bg-black border-t border-gray-900 flex items-center justify-between px-4 text-white">
+            <div className="w-1/4">
+                <p className="font-semibold">I Want To Hold Your Hand</p>
+                <p className="text-xs text-gray-400">The Beatles</p>
+            </div>
+            <div className="w-1/2 flex flex-col items-center gap-2">
+                 <div className="flex items-center gap-4 text-2xl">
+                    <button className="text-gray-400 hover:text-white">«</button>
+                    <button className="p-2 bg-white text-black rounded-full hover:scale-105">
+                         <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                    </button>
+                    <button className="text-gray-400 hover:text-white">»</button>
+                 </div>
+                 <div className="w-full h-1 bg-gray-700 rounded-full mt-1">
+                    <div className="w-1/2 h-full bg-white rounded-full"></div>
+                 </div>
+            </div>
+            <div className="w-1/4 flex justify-end items-center gap-2">
+                <p className="text-xs">Volume</p>
+            </div>
+        </footer>
+    );
+}
+
 
 // --- API Fetch Hook ---
 const useSpotifyApi = (url) => {
@@ -317,16 +368,21 @@ function ContentSection({ title, children }) {
                 <h2 className="text-2xl font-bold hover:underline cursor-pointer">{title}</h2>
                 <span className="text-sm font-bold text-gray-400 hover:underline cursor-pointer">Show all</span>
             </div>
-            {children}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
+                {children}
+            </div>
         </section>
     );
 }
 
-function PlaylistCard({ imageUrl, title, subtitle }) {
+function PlaylistCard({ imageUrl, title, subtitle, isArtist = false }) {
+    const cardClasses = isArtist ? "p-4 rounded-full" : "p-4 rounded-lg";
+    const imageClasses = isArtist ? "rounded-full shadow-lg" : "rounded-md shadow-lg";
+
     return (
-        <div className="bg-[#181818] p-4 rounded-lg hover:bg-[#282828] transition-colors duration-300 group cursor-pointer">
+        <div className="bg-[#181818] rounded-lg hover:bg-[#282828] transition-colors duration-300 group cursor-pointer p-4">
             <div className="relative mb-4">
-                <img src={imageUrl || 'https://placehold.co/300x300/181818/FFFFFF?text=...'} alt={title} className="w-full h-auto rounded-md shadow-lg"/>
+                <img src={imageUrl || 'https://placehold.co/300x300/181818/FFFFFF?text=...'} alt={title} className={`w-full h-auto ${imageClasses}`}/>
                 <div className="absolute bottom-2 right-2 w-12 h-12 bg-green-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 group-hover:bottom-4 transition-all duration-300 shadow-xl">
                     <svg className="w-6 h-6 text-black" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                 </div>
@@ -336,7 +392,6 @@ function PlaylistCard({ imageUrl, title, subtitle }) {
         </div>
     );
 }
-
 
 function HomePage() {
     const { data: profile, loading: profileLoading } = useSpotifyApi('/me');
@@ -362,11 +417,11 @@ function HomePage() {
              <section>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                     {recent && recent.items.map(({ track }, index) => (
-                       <div key={`${track.id}-${index}`} className="bg-white/10 hover:bg-white/20 transition-colors duration-300 rounded-md flex items-center gap-4 group cursor-pointer">
-                           <img src={track.album.images[0]?.url || 'https://placehold.co/80x80/181818/FFFFFF?text=...'} alt={track.name} className="w-20 h-20 rounded-l-md"/>
+                       <div key={`${track.id}-${index}`} className="bg-white/10 hover:bg-white/20 transition-colors duration-300 rounded-md flex items-center gap-4 group cursor-pointer overflow-hidden">
+                           <img src={track.album.images[0]?.url || 'https://placehold.co/80x80/181818/FFFFFF?text=...'} alt={track.name} className="w-20 h-20 flex-shrink-0"/>
                            <p className="font-semibold text-white flex-1 pr-2">{track.name}</p>
-                           <div className="mr-4 w-10 h-10 bg-green-500 rounded-full items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 shadow-xl hidden sm:flex">
-                              <svg className="w-5 h-5 text-black" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                           <div className="mr-4 w-12 h-12 bg-green-500 rounded-full items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 shadow-xl hidden sm:flex">
+                              <svg className="w-6 h-6 text-black" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                            </div>
                        </div> 
                     ))}
@@ -374,29 +429,26 @@ function HomePage() {
             </section>
 
             <ContentSection title={featuredPlaylistsData?.message || "Featured Playlists"}>
-                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
-                    {featuredPlaylistsData && featuredPlaylistsData.playlists.items.map(playlist => (
-                       <PlaylistCard 
-                            key={playlist.id} 
-                            imageUrl={playlist.images[0]?.url}
-                            title={playlist.name}
-                            subtitle={playlist.description.replace(/<[^>]*>?/gm, '')} // Remove HTML from description
-                        />
-                    ))}
-                </div>
+                {featuredPlaylistsData && featuredPlaylistsData.playlists.items.map(playlist => (
+                   <PlaylistCard 
+                        key={playlist.id} 
+                        imageUrl={playlist.images[0]?.url}
+                        title={playlist.name}
+                        subtitle={playlist.description.replace(/<[^>]*>?/gm, '')}
+                    />
+                ))}
             </ContentSection>
 
             <ContentSection title="Your Top Artists">
-                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
-                    {topArtists && topArtists.items.map(artist => (
-                       <PlaylistCard 
-                            key={artist.id} 
-                            imageUrl={artist.images[0]?.url}
-                            title={artist.name}
-                            subtitle="Artist"
-                        />
-                    ))}
-                </div>
+                {topArtists && topArtists.items.map(artist => (
+                   <PlaylistCard 
+                        key={artist.id} 
+                        imageUrl={artist.images[0]?.url}
+                        title={artist.name}
+                        subtitle="Artist"
+                        isArtist={true}
+                    />
+                ))}
             </ContentSection>
         </div>
     );
