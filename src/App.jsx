@@ -156,19 +156,27 @@ export default function App() {
     const [isPlayerReady, setIsPlayerReady] = useState(false);
     const [currentTrack, setCurrentTrack] = useState(null);
     const [isPaused, setIsPaused] = useState(true);
+    const [sdkLoaded, setSdkLoaded] = useState(false);
 
+    // Effect for loading all external scripts
     useEffect(() => {
-        const script = document.createElement('script');
-        script.src = 'https://cdn.tailwindcss.com';
-        document.head.appendChild(script);
+        const tailwindScript = document.createElement('script');
+        tailwindScript.src = 'https://cdn.tailwindcss.com';
+        document.head.appendChild(tailwindScript);
+
+        // Define the global callback that the Spotify SDK will call
+        window.onSpotifyWebPlaybackSDKReady = () => {
+            console.log("Spotify SDK is ready to be used.");
+            setSdkLoaded(true);
+        };
 
         const sdkScript = document.createElement("script");
         sdkScript.src = "https://sdk.scdn.co/spotify-player.js";
         sdkScript.async = true;
         document.body.appendChild(sdkScript);
-
     }, []);
 
+    // Effect for handling authentication token
     useEffect(() => {
         const clientId = window.localStorage.getItem("spotify_client_id");
         const params = new URLSearchParams(window.location.search);
@@ -218,28 +226,27 @@ export default function App() {
         }
     }, []);
 
-     useEffect(() => {
-        if (!token) return;
-
-        window.onSpotifyWebPlaybackSDKReady = () => {
-            const player = new window.Spotify.Player({
+    // Effect for initializing the Spotify Player
+    useEffect(() => {
+        if (token && sdkLoaded) {
+            const playerInstance = new window.Spotify.Player({
                 name: 'React Spotify Clone',
                 getOAuthToken: cb => { cb(token); },
                 volume: 0.5
             });
 
-            setPlayer(player);
+            setPlayer(playerInstance);
 
-            player.addListener('ready', ({ device_id }) => {
+            playerInstance.addListener('ready', ({ device_id }) => {
                 console.log('Ready with Device ID', device_id);
                 setIsPlayerReady(true);
             });
 
-            player.addListener('not_ready', ({ device_id }) => {
+            playerInstance.addListener('not_ready', ({ device_id }) => {
                 console.log('Device ID has gone offline', device_id);
             });
             
-             player.addListener('player_state_changed', ( state => {
+            playerInstance.addListener('player_state_changed', ( state => {
                 if (!state) {
                     return;
                 }
@@ -247,10 +254,13 @@ export default function App() {
                 setIsPaused(state.paused);
             }));
 
+            playerInstance.connect();
 
-            player.connect();
-        };
-    }, [token]);
+            return () => {
+                playerInstance.disconnect();
+            };
+        }
+    }, [token, sdkLoaded]);
 
     const logout = () => {
         setToken(null);
@@ -638,6 +648,7 @@ function PlaylistCurator() {
         </div>
     );
 }
+
 
 
 
