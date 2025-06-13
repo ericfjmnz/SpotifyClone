@@ -13,8 +13,12 @@ const SCOPES = [
     "playlist-read-private",
     "user-top-read",
     "user-read-recently-played",
-    "playlist-read-private", // Added for fetching user playlists
-    "playlist-read-collaborative" // Added for collaborative playlists
+    "playlist-read-private",
+    "playlist-read-collaborative",
+    // Scopes required for Web Playback SDK
+    "streaming",
+    "user-read-playback-state",
+    "user-modify-playback-state"
 ].join(" ");
 
 
@@ -147,15 +151,22 @@ export default function App() {
     const [token, setToken] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
     const [view, setView] = useState('home'); 
+    const [selectedPlaylistId, setSelectedPlaylistId] = useState(null);
+    const [player, setPlayer] = useState(null);
+    const [isPlayerReady, setIsPlayerReady] = useState(false);
+    const [currentTrack, setCurrentTrack] = useState(null);
+    const [isPaused, setIsPaused] = useState(true);
 
-    // **FIX**: Dynamically load Tailwind CSS
     useEffect(() => {
         const script = document.createElement('script');
         script.src = 'https://cdn.tailwindcss.com';
         document.head.appendChild(script);
 
-        // This is a common pattern, but be aware it relies on the CDN script loading and parsing.
-        // For production apps, integrating Tailwind into the build process is preferred.
+        const sdkScript = document.createElement("script");
+        sdkScript.src = "https://sdk.scdn.co/spotify-player.js";
+        sdkScript.async = true;
+        document.body.appendChild(sdkScript);
+
     }, []);
 
     useEffect(() => {
@@ -191,7 +202,6 @@ export default function App() {
             } catch (error) {
                 console.error("Error fetching token:", error);
                 window.localStorage.removeItem("spotify_token");
-                window.localStorage.removeItem("code_verifier");
             } finally {
                 setIsLoading(false);
             }
@@ -208,13 +218,49 @@ export default function App() {
         }
     }, []);
 
+     useEffect(() => {
+        if (!token) return;
+
+        window.onSpotifyWebPlaybackSDKReady = () => {
+            const player = new window.Spotify.Player({
+                name: 'React Spotify Clone',
+                getOAuthToken: cb => { cb(token); },
+                volume: 0.5
+            });
+
+            setPlayer(player);
+
+            player.addListener('ready', ({ device_id }) => {
+                console.log('Ready with Device ID', device_id);
+                setIsPlayerReady(true);
+            });
+
+            player.addListener('not_ready', ({ device_id }) => {
+                console.log('Device ID has gone offline', device_id);
+            });
+            
+             player.addListener('player_state_changed', ( state => {
+                if (!state) {
+                    return;
+                }
+                setCurrentTrack(state.track_window.current_track);
+                setIsPaused(state.paused);
+            }));
+
+
+            player.connect();
+        };
+    }, [token]);
+
     const logout = () => {
         setToken(null);
+        if(player) player.disconnect();
         window.localStorage.removeItem("spotify_token");
         window.localStorage.removeItem("spotify_client_id");
         window.localStorage.removeItem("code_verifier");
         window.history.replaceState(null, null, window.location.pathname);
         setView('home');
+        setSelectedPlaylistId(null);
     };
     
     if (isLoading) {
@@ -226,7 +272,7 @@ export default function App() {
     }
 
     return (
-        <AppContext.Provider value={{ token, view, setView }}>
+        <AppContext.Provider value={{ token, view, setView, selectedPlaylistId, setSelectedPlaylistId, player, isPlayerReady, currentTrack, isPaused }}>
             <div className="h-screen w-full flex flex-col bg-black text-white font-sans">
                 <div className="flex flex-1 overflow-y-hidden">
                     <Sidebar logout={logout} />
@@ -242,18 +288,26 @@ export default function App() {
 // --- Layout Components ---
 
 function Sidebar({ logout }) {
-    const { view, setView } = useContext(AppContext);
+    const { view, setView, setSelectedPlaylistId } = useContext(AppContext);
     const { data: playlists, loading: playlistsLoading } = useSpotifyApi('/me/playlists');
     
     const NavItem = ({ label, targetView, icon }) => (
          <li
-            onClick={() => setView(targetView)}
-            className={`flex items-center space-x-4 px-4 py-2 rounded-md cursor-pointer transition-colors duration-200 ${view === targetView ? 'bg-gray-800 text-white' : 'text-gray-400 hover:text-white'}`}
+            onClick={() => {
+                setView(targetView);
+                setSelectedPlaylistId(null); // Go to home when clicking nav items
+            }}
+            className={`flex items-center space-x-4 px-4 py-2 rounded-md cursor-pointer transition-colors duration-200 ${view === targetView && !selectedPlaylistId ? 'bg-gray-800 text-white' : 'text-gray-400 hover:text-white'}`}
         >
             {icon}
             <span className="font-semibold">{label}</span>
         </li>
     );
+    
+     const handlePlaylistClick = (playlistId) => {
+        setSelectedPlaylistId(playlistId);
+        setView('playlist');
+    };
 
     return (
         <nav className="w-64 bg-black p-2 flex-shrink-0 flex-col hidden sm:flex">
@@ -270,7 +324,7 @@ function Sidebar({ logout }) {
                  ) : (
                     <ul className="space-y-1">
                         {playlists?.items.map(playlist => (
-                            <li key={playlist.id} className="text-gray-400 hover:text-white p-2 rounded-md cursor-pointer truncate text-sm">
+                            <li key={playlist.id} onClick={() => handlePlaylistClick(playlist.id)} className={`text-gray-400 hover:text-white p-2 rounded-md cursor-pointer truncate text-sm ${selectedPlaylistId === playlist.id ? 'bg-gray-800 !text-white' : ''}`}>
                                 {playlist.name}
                             </li>
                         ))}
@@ -285,13 +339,13 @@ function Sidebar({ logout }) {
 }
 
 function MainContent() {
-    const { view } = useContext(AppContext);
+    const { view, selectedPlaylistId } = useContext(AppContext);
     
     return (
         <main className="flex-1 bg-gradient-to-b from-gray-800 to-[#121212] overflow-y-auto">
             <div className="p-6 md:p-8">
                 {view === 'home' && <HomePage />}
-                {view === 'curator' && <PlaylistCurator />}
+                {view === 'playlist' && <PlaylistView playlistId={selectedPlaylistId} />}
                 {view === 'search' && <div className="text-center"><h1 className="text-3xl font-bold">Search</h1><p className="text-gray-400">Search functionality coming soon!</p></div>}
             </div>
         </main>
@@ -299,16 +353,28 @@ function MainContent() {
 }
 
 function RightSidebar() {
-    // Placeholder content matching the screenshot's vibe
+    const { currentTrack } = useContext(AppContext);
+
+    if (!currentTrack) {
+       return (
+        <aside className="w-80 bg-black p-2 flex-shrink-0 hidden lg:flex flex-col">
+            <div className="bg-[#121212] rounded-lg p-4">
+                <h2 className="font-bold text-white mb-4">Now Playing</h2>
+                <p className="text-gray-400">No song selected.</p>
+            </div>
+        </aside>
+       );
+    }
+    
     return (
         <aside className="w-80 bg-black p-2 flex-shrink-0 hidden lg:flex flex-col">
             <div className="bg-[#121212] rounded-lg p-4">
                 <h2 className="font-bold text-white mb-4">Now Playing</h2>
-                 <img src="https://i.scdn.co/image/ab67616d0000b273e93a35d3962a4a79c941555c" alt="Album Art" className="w-full rounded-md mb-4"/>
+                 <img src={currentTrack.album.images[0]?.url} alt="Album Art" className="w-full rounded-md mb-4"/>
                 <div className="flex justify-between items-center">
                     <div>
-                        <h3 className="font-bold text-white">I Want To Hold Your Hand</h3>
-                        <p className="text-sm text-gray-400">The Beatles</p>
+                        <h3 className="font-bold text-white">{currentTrack.name}</h3>
+                        <p className="text-sm text-gray-400">{currentTrack.artists.map(a => a.name).join(', ')}</p>
                     </div>
                     <button className="text-gray-400 hover:text-white">+</button>
                 </div>
@@ -318,17 +384,31 @@ function RightSidebar() {
 }
 
 function PlayerBar() {
+    const { player, currentTrack, isPaused } = useContext(AppContext);
+
+    if (!player || !currentTrack) return <footer className="h-24 bg-black border-t border-gray-800 flex items-center justify-center"><p className="text-gray-400">No player available.</p></footer>;
+    
+    const togglePlay = () => {
+        player.togglePlay();
+    };
+
     return (
         <footer className="h-24 bg-black border-t border-gray-800 flex items-center justify-between px-4 text-white">
-            <div className="w-1/4">
-                <p className="font-semibold">I Want To Hold Your Hand</p>
-                <p className="text-xs text-gray-400">The Beatles</p>
+            <div className="w-1/4 flex items-center gap-3">
+                <img src={currentTrack.album.images[0]?.url} alt="" className="w-14 h-14"/>
+                <div>
+                    <p className="font-semibold">{currentTrack.name}</p>
+                    <p className="text-xs text-gray-400">{currentTrack.artists.map(a => a.name).join(', ')}</p>
+                </div>
             </div>
             <div className="w-1/2 flex flex-col items-center gap-2">
                  <div className="flex items-center gap-4 text-2xl">
                     <button className="text-gray-400 hover:text-white">«</button>
-                    <button className="p-2 bg-white text-black rounded-full hover:scale-105">
-                         <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                    <button onClick={togglePlay} className="p-2 bg-white text-black rounded-full hover:scale-105">
+                        {isPaused ? 
+                            <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg> :
+                            <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                        }
                     </button>
                     <button className="text-gray-400 hover:text-white">»</button>
                  </div>
@@ -472,6 +552,56 @@ function HomePage() {
                     />
                 ))}
             </ContentSection>
+        </div>
+    );
+}
+
+function PlaylistView({ playlistId }) {
+    const { data: playlist, loading } = useSpotifyApi(`/playlists/${playlistId}`);
+    const { token } = useContext(AppContext);
+
+    const playTrack = (trackUri) => {
+        fetch(`https://api.spotify.com/v1/me/player/play`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ uris: [trackUri] })
+        });
+    };
+
+    if (loading) return <div className="text-center p-10">Loading playlist...</div>;
+    if (!playlist) return <div className="text-center p-10">Playlist not found.</div>;
+
+    return (
+        <div className="text-white">
+            <header className="flex items-end gap-6 mb-8">
+                <img src={playlist.images[0]?.url} alt="" className="w-48 h-48 shadow-2xl"/>
+                <div>
+                    <p className="text-sm font-bold">Playlist</p>
+                    <h1 className="text-5xl font-extrabold">{playlist.name}</h1>
+                    <p className="text-gray-300 mt-2">{playlist.description.replace(/<[^>]*>?/gm, '')}</p>
+                </div>
+            </header>
+            
+            <div>
+                {playlist.tracks.items.map(({ track }, index) => (
+                    <div key={track.id + index} className="grid grid-cols-[auto,1fr,auto] items-center gap-4 p-2 rounded-md hover:bg-white/10 group">
+                        <div className="text-gray-400 w-8 text-center">{index + 1}</div>
+                        <div className="flex items-center gap-4">
+                            <img src={track.album.images[2]?.url} alt="" className="w-10 h-10"/>
+                            <div>
+                                <p className="font-semibold text-white">{track.name}</p>
+                                <p className="text-sm text-gray-400">{track.artists.map(a => a.name).join(', ')}</p>
+                            </div>
+                        </div>
+                        <button onClick={() => playTrack(track.uri)} className="text-white opacity-0 group-hover:opacity-100">
+                             <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                        </button>
+                    </div>
+                ))}
+            </div>
         </div>
     );
 }
