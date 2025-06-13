@@ -803,12 +803,13 @@ function PlaylistCreator() {
         setIsWqxrLoading(true);
         setError('');
         setCreatedPlaylist(null);
-        setStatus('Requesting playlist from proxy server...');
+        setStatus('Starting WQXR playlist creation...');
 
+        // **NOTE**: This function is now using the proxy server logic you selected.
+        // Make sure your proxy server is running on localhost:3001
         try {
             const { year, month, day } = getYesterdayDateParts();
     
-            // **CHANGE HERE**: Fetch from your new proxy server
             const proxyResponse = await fetch(`http://localhost:3001/wqxr-playlist?year=${year}&month=${month}&day=${day}`);
             
             if (!proxyResponse.ok) {
@@ -846,16 +847,30 @@ function PlaylistCreator() {
                 return;
             }
             
-            // The rest of the function (creating the playlist, adding tracks) remains the same...
+            const playlistName = `WQXR Daily - ${yesterdayYear}-${yesterdayMonth}-${yesterdayDay}`;
+            const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`},
+                body: JSON.stringify({ name: playlistName, description: `A playlist of songs from WQXR on ${yesterdayYear}-${yesterdayMonth}-${yesterdayDay}.`, public: false })
+            });
+            const newPlaylist = await playlistResponse.json();
     
+            await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
+                 method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ uris: trackUris })
+            });
+            
+            setCreatedPlaylist(newPlaylist);
+            setStatus('WQXR playlist created successfully!');
+            setLibraryVersion(v => v + 1);
+        
         } catch (e) {
             setError(e.message);
             console.error(e);
         } finally {
             setIsWqxrLoading(false);
         }
-    };
-
     };
     
     const resetCustomForm = () => {
@@ -884,7 +899,7 @@ function PlaylistCreator() {
         setStatus('Asking AI for song ideas... This may take a moment.');
 
         try {
-            const geminiPrompt = `Based on the following theme: "${aiPrompt}", generate a list of 15 suitable songs. Include a mix of popular and less common tracks if possible.`;
+            const geminiPrompt = `Based on the following theme: "${aiPrompt}", generate a list of 100 suitable songs. Include a mix of popular and less common tracks if possible.`;
             let chatHistory = [{ role: "user", parts: [{ text: geminiPrompt }] }];
             const payload = {
                 contents: chatHistory,
@@ -909,7 +924,7 @@ function PlaylistCreator() {
                     }
                 }
             };
-            const apiKey = "AIzaSyAsb7lrYNWBzSIUe5RUCOCMib20FzAX61M";
+            const apiKey = "";
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
             const geminiResponse = await fetch(apiUrl, {
                 method: 'POST',
@@ -1034,7 +1049,7 @@ function PlaylistCreator() {
             )}
         </div>
     );
-
+}
 
 function EditPlaylistModal({ playlist, onClose }) {
     const { token, setLibraryVersion } = useContext(AppContext);
@@ -1096,6 +1111,7 @@ function EditPlaylistModal({ playlist, onClose }) {
     )
 }
 
+
 function DeleteConfirmationModal({ playlist, onClose }) {
     const { token, setLibraryVersion, setView, setSelectedPlaylistId } = useContext(AppContext);
     const [isDeleting, setIsDeleting] = useState(false);
@@ -1136,6 +1152,7 @@ function DeleteConfirmationModal({ playlist, onClose }) {
         </div>
     );
 }
+
 
 
 
