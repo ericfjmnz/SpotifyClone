@@ -164,9 +164,7 @@ export default function App() {
         tailwindScript.src = 'https://cdn.tailwindcss.com';
         document.head.appendChild(tailwindScript);
 
-        // Define the global callback that the Spotify SDK will call
         window.onSpotifyWebPlaybackSDKReady = () => {
-            console.log("Spotify SDK is ready to be used.");
             setSdkLoaded(true);
         };
 
@@ -238,13 +236,9 @@ export default function App() {
             setPlayer(playerInstance);
 
             playerInstance.addListener('ready', ({ device_id }) => {
-                console.log('Ready with Device ID', device_id);
                 setIsPlayerReady(true);
             });
-
-            playerInstance.addListener('not_ready', ({ device_id }) => {
-                console.log('Device ID has gone offline', device_id);
-            });
+            playerInstance.addListener('not_ready', ({ device_id }) => {});
             
             playerInstance.addListener('player_state_changed', ( state => {
                 if (!state) {
@@ -273,7 +267,7 @@ export default function App() {
         setSelectedPlaylistId(null);
     };
     
-    if (isLoading) {
+    if (isLoading && !token) {
         return <div className="h-screen w-full flex items-center justify-center bg-black text-white"><p>Loading...</p></div>;
     }
 
@@ -305,7 +299,7 @@ function Sidebar({ logout }) {
          <li
             onClick={() => {
                 setView(targetView);
-                setSelectedPlaylistId(null); // Go to home when clicking nav items
+                setSelectedPlaylistId(null);
             }}
             className={`flex items-center space-x-4 px-4 py-2 rounded-md cursor-pointer transition-colors duration-200 ${view === targetView && !selectedPlaylistId ? 'bg-gray-800 text-white' : 'text-gray-400 hover:text-white'}`}
         >
@@ -474,7 +468,8 @@ const useSpotifyApi = (url) => {
 
 // --- View Components ---
 
-function ContentSection({ title, children }) {
+function ContentSection({ title, children, error }) {
+     if (error) return <p className="text-red-400">Could not load section: {error.message}</p>;
     return (
         <section>
             <div className="flex justify-between items-center mb-4">
@@ -506,10 +501,10 @@ function PlaylistCard({ imageUrl, title, subtitle, isArtist = false }) {
 }
 
 function HomePage() {
-    const { data: profile, loading: profileLoading } = useSpotifyApi('/me');
-    const { data: featuredPlaylistsData, loading: playlistsLoading } = useSpotifyApi('/browse/featured-playlists?limit=5');
-    const { data: topArtists, loading: artistsLoading } = useSpotifyApi('/me/top/artists?limit=5');
-    const { data: recent, loading: recentLoading } = useSpotifyApi('/me/player/recently-played?limit=6');
+    const { data: profile, loading: profileLoading, error: profileError } = useSpotifyApi('/me');
+    const { data: featuredPlaylistsData, loading: playlistsLoading, error: playlistsError } = useSpotifyApi('/browse/featured-playlists?limit=5');
+    const { data: topArtists, loading: artistsLoading, error: artistsError } = useSpotifyApi('/me/top/artists?limit=5');
+    const { data: recent, loading: recentLoading, error: recentError } = useSpotifyApi('/me/player/recently-played?limit=6');
 
     const getGreeting = () => {
         const hour = new Date().getHours();
@@ -518,17 +513,19 @@ function HomePage() {
         return "Good evening";
     };
 
-    if (profileLoading || playlistsLoading || artistsLoading || recentLoading) {
+    const isLoading = profileLoading || playlistsLoading || artistsLoading || recentLoading;
+
+    if (isLoading) {
         return <div className="text-white text-center p-10">Loading your space...</div>;
     }
 
     return (
         <div className="space-y-12">
             <h1 className="text-3xl font-bold">{getGreeting()}</h1>
-
-             <section>
+            
+            <ContentSection title="Recently Played" error={recentError}>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                    {recent && recent.items.map(({ track }, index) => (
+                    {recent?.items.map(({ track }, index) => (
                        <div key={`${track.id}-${index}`} className="bg-white/10 hover:bg-white/20 transition-colors duration-300 rounded-md flex items-center gap-4 group cursor-pointer overflow-hidden">
                            <img src={track.album.images[0]?.url || 'https://placehold.co/80x80/181818/FFFFFF?text=...'} alt={track.name} className="w-20 h-20 flex-shrink-0"/>
                            <p className="font-semibold text-white flex-1 pr-2">{track.name}</p>
@@ -538,10 +535,10 @@ function HomePage() {
                        </div> 
                     ))}
                 </div>
-            </section>
-
-            <ContentSection title={featuredPlaylistsData?.message || "Featured Playlists"}>
-                {featuredPlaylistsData && featuredPlaylistsData.playlists.items.map(playlist => (
+            </ContentSection>
+            
+            <ContentSection title={featuredPlaylistsData?.message || "Featured Playlists"} error={playlistsError}>
+                {featuredPlaylistsData?.playlists.items.map(playlist => (
                    <PlaylistCard 
                         key={playlist.id} 
                         imageUrl={playlist.images[0]?.url}
@@ -551,8 +548,8 @@ function HomePage() {
                 ))}
             </ContentSection>
 
-            <ContentSection title="Your Top Artists">
-                {topArtists && topArtists.items.map(artist => (
+            <ContentSection title="Your Top Artists" error={artistsError}>
+                {topArtists?.items.map(artist => (
                    <PlaylistCard 
                         key={artist.id} 
                         imageUrl={artist.images[0]?.url}
