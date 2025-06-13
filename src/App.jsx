@@ -158,6 +158,17 @@ export default function App() {
     const [isPaused, setIsPaused] = useState(true);
     const [sdkLoaded, setSdkLoaded] = useState(false);
 
+    const logout = useCallback(() => {
+        setToken(null);
+        if(player) player.disconnect();
+        window.localStorage.removeItem("spotify_token");
+        window.localStorage.removeItem("spotify_client_id");
+        window.localStorage.removeItem("code_verifier");
+        window.history.replaceState(null, null, window.location.pathname);
+        setView('home');
+        setSelectedPlaylistId(null);
+    }, [player]);
+
     // Effect for loading external Spotify SDK
     useEffect(() => {
         window.onSpotifyWebPlaybackSDKReady = () => {
@@ -251,17 +262,6 @@ export default function App() {
             };
         }
     }, [token, sdkLoaded]);
-
-    const logout = () => {
-        setToken(null);
-        if(player) player.disconnect();
-        window.localStorage.removeItem("spotify_token");
-        window.localStorage.removeItem("spotify_client_id");
-        window.localStorage.removeItem("code_verifier");
-        window.history.replaceState(null, null, window.location.pathname);
-        setView('home');
-        setSelectedPlaylistId(null);
-    };
     
     if (isLoading && !token) {
         return <div className="h-screen w-full flex items-center justify-center bg-black text-white"><p>Loading...</p></div>;
@@ -272,10 +272,10 @@ export default function App() {
     }
 
     return (
-        <AppContext.Provider value={{ token, view, setView, selectedPlaylistId, setSelectedPlaylistId, player, isPlayerReady, currentTrack, isPaused }}>
+        <AppContext.Provider value={{ token, view, setView, selectedPlaylistId, setSelectedPlaylistId, player, isPlayerReady, currentTrack, isPaused, logout }}>
             <div className="h-screen w-full flex flex-col bg-black text-white font-sans">
                 <div className="flex flex-1 overflow-y-hidden">
-                    <Sidebar logout={logout} />
+                    <Sidebar />
                     <MainContent />
                     <RightSidebar />
                 </div>
@@ -287,8 +287,8 @@ export default function App() {
 
 // --- Layout Components ---
 
-function Sidebar({ logout }) {
-    const { view, setView, selectedPlaylistId, setSelectedPlaylistId } = useContext(AppContext);
+function Sidebar() {
+    const { view, setView, selectedPlaylistId, setSelectedPlaylistId, logout } = useContext(AppContext);
     const { data: playlists, loading: playlistsLoading } = useSpotifyApi('/me/playlists');
     
     const NavItem = ({ label, targetView, icon }) => (
@@ -426,7 +426,7 @@ function PlayerBar() {
 
 // --- API Fetch Hook ---
 const useSpotifyApi = (url) => {
-    const { token } = useContext(AppContext);
+    const { token, logout } = useContext(AppContext);
     const [data, setData] = useState(null);
     const [error, setError] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -439,13 +439,16 @@ const useSpotifyApi = (url) => {
             };
             try {
                 setLoading(true);
-                // **FIX**: Append a timestamp to the URL to bust the cache
                 const cacheBustedUrl = `${url}${url.includes('?') ? '&' : '?'}t=${new Date().getTime()}`;
                 const response = await fetch(`https://api.spotify.com/v1${cacheBustedUrl}`, {
                     headers: {
                         Authorization: `Bearer ${token}`,
                     }
                 });
+                if (response.status === 401) {
+                    logout(); // **FIX**: Token is bad, logout user
+                    return;
+                }
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -458,7 +461,7 @@ const useSpotifyApi = (url) => {
             }
         };
         fetchData();
-    }, [token, url]);
+    }, [token, url, logout]);
 
     return { data, error, loading };
 };
