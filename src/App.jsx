@@ -158,12 +158,8 @@ export default function App() {
     const [isPaused, setIsPaused] = useState(true);
     const [sdkLoaded, setSdkLoaded] = useState(false);
 
-    // Effect for loading all external scripts
+    // Effect for loading external Spotify SDK
     useEffect(() => {
-        const tailwindScript = document.createElement('script');
-        tailwindScript.src = 'https://cdn.tailwindcss.com';
-        document.head.appendChild(tailwindScript);
-
         window.onSpotifyWebPlaybackSDKReady = () => {
             setSdkLoaded(true);
         };
@@ -292,7 +288,7 @@ export default function App() {
 // --- Layout Components ---
 
 function Sidebar({ logout }) {
-    const { view, setView, setSelectedPlaylistId } = useContext(AppContext);
+    const { view, setView, selectedPlaylistId, setSelectedPlaylistId } = useContext(AppContext);
     const { data: playlists, loading: playlistsLoading } = useSpotifyApi('/me/playlists');
     
     const NavItem = ({ label, targetView, icon }) => (
@@ -447,7 +443,7 @@ const useSpotifyApi = (url) => {
                     headers: {
                         Authorization: `Bearer ${token}`,
                     },
-                    cache: 'no-cache', // **FIX**: Disable caching to prevent 304 errors
+                    cache: 'no-cache',
                 });
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
