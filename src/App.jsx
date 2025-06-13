@@ -160,7 +160,11 @@ export default function App() {
     const [isPaused, setIsPaused] = useState(true);
     const [position, setPosition] = useState(0);
     const [sdkLoaded, setSdkLoaded] = useState(false);
-    const [playlistsVersion, setPlaylistsVersion] = useState(0);
+    const [libraryVersion, setLibraryVersion] = useState(0); // Renamed for clarity
+    const [profile, setProfile] = useState(null);
+    const [playlistToEdit, setPlaylistToEdit] = useState(null);
+    const [playlistToDelete, setPlaylistToDelete] = useState(null);
+
 
     const logout = useCallback(() => {
         setToken(null);
@@ -299,7 +303,7 @@ export default function App() {
     }
 
     return (
-        <AppContext.Provider value={{ token, view, setView, selectedPlaylistId, setSelectedPlaylistId, player, isPlayerReady, currentTrack, isPaused, logout, deviceId, position, playlistsVersion, setPlaylistsVersion }}>
+        <AppContext.Provider value={{ token, view, setView, selectedPlaylistId, setSelectedPlaylistId, player, isPlayerReady, currentTrack, isPaused, logout, deviceId, position, libraryVersion, setLibraryVersion, profile, setProfile, setPlaylistToEdit, setPlaylistToDelete }}>
             <div className="h-screen w-full flex flex-col bg-black text-white font-sans">
                 <div className="flex flex-1 overflow-y-hidden">
                     <Sidebar />
@@ -307,6 +311,8 @@ export default function App() {
                     <RightSidebar />
                 </div>
                 <PlayerBar />
+                {playlistToEdit && <EditPlaylistModal playlist={playlistToEdit} onClose={() => setPlaylistToEdit(null)} />}
+                {playlistToDelete && <DeleteConfirmationModal playlist={playlistToDelete} onClose={() => setPlaylistToDelete(null)} />}
             </div>
         </AppContext.Provider>
     );
@@ -315,8 +321,9 @@ export default function App() {
 // --- Layout Components ---
 
 function Sidebar() {
-    const { view, setView, selectedPlaylistId, setSelectedPlaylistId, logout, playlistsVersion } = useContext(AppContext);
-    const { data: playlists, loading: playlistsLoading } = useSpotifyApi(`/me/playlists?v=${playlistsVersion}`);
+    const { view, setView, selectedPlaylistId, setSelectedPlaylistId, logout, libraryVersion, profile, setPlaylistToEdit, setPlaylistToDelete } = useContext(AppContext);
+    const { data: playlists, loading: playlistsLoading } = useSpotifyApi(`/me/playlists?v=${libraryVersion}`);
+    const [activeMenu, setActiveMenu] = useState(null);
     
     const NavItem = ({ label, targetView, icon }) => (
          <li
@@ -352,8 +359,21 @@ function Sidebar() {
                  ) : (
                     <ul className="space-y-1">
                         {playlists?.items.map(playlist => (
-                            <li key={playlist.id} onClick={() => handlePlaylistClick(playlist.id)} className={`text-gray-400 hover:text-white p-2 rounded-md cursor-pointer truncate text-sm ${selectedPlaylistId === playlist.id ? 'bg-gray-800 !text-white' : ''}`}>
-                                {playlist.name}
+                            <li key={playlist.id} className={`group flex justify-between items-center text-gray-400 hover:text-white p-2 rounded-md cursor-pointer text-sm ${selectedPlaylistId === playlist.id ? 'bg-gray-800 !text-white' : ''}`}>
+                                <span onClick={() => handlePlaylistClick(playlist.id)} className="truncate flex-1">{playlist.name}</span>
+                                {profile?.id === playlist.owner.id && (
+                                <div className="relative">
+                                    <button onClick={() => setActiveMenu(activeMenu === playlist.id ? null : playlist.id)} className="hidden group-hover:block p-1">
+                                         <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 16 16"><path d="M9.5 13a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/></svg>
+                                    </button>
+                                    {activeMenu === playlist.id && (
+                                        <div className="absolute right-0 bottom-full mb-1 w-32 bg-gray-800 rounded-md shadow-lg z-10">
+                                            <button onClick={() => {setPlaylistToEdit(playlist); setActiveMenu(null);}} className="block w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700">Edit details</button>
+                                            <button onClick={() => {setPlaylistToDelete(playlist); setActiveMenu(null);}} className="block w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700">Delete</button>
+                                        </div>
+                                    )}
+                                </div>
+                                )}
                             </li>
                         ))}
                     </ul>
@@ -593,14 +613,18 @@ function PlaylistCard({ imageUrl, title, subtitle, isArtist = false }) {
 }
 
 function HomePage() {
-    const { data: profile } = useSpotifyApi('/me');
+    const { setProfile } = useContext(AppContext);
+    const { data: profileData } = useSpotifyApi('/me');
     const [featuredPlaylistsUrl, setFeaturedPlaylistsUrl] = useState(null);
-    
+
     useEffect(() => {
-        if(profile?.country) {
-            setFeaturedPlaylistsUrl(`/browse/featured-playlists?country=${profile.country}&limit=5`);
+        if(profileData) {
+            setProfile(profileData);
+            if(profileData.country) {
+                setFeaturedPlaylistsUrl(`/browse/featured-playlists?country=${profileData.country}&limit=5`);
+            }
         }
-    }, [profile]);
+    }, [profileData, setProfile]);
     
     const { data: featuredPlaylistsData, loading: playlistsLoading, error: playlistsError } = useSpotifyApi(featuredPlaylistsUrl);
     const { data: topArtists, loading: artistsLoading, error: artistsError } = useSpotifyApi('/me/top/artists?limit=5');
@@ -748,8 +772,7 @@ function PlaylistView({ playlistId }) {
 }
 
 function PlaylistCreator() {
-    const { token, setPlaylistsVersion } = useContext(AppContext);
-    const { data: profile } = useSpotifyApi('/me');
+    const { token, setLibraryVersion, profile } = useContext(AppContext);
     const [status, setStatus] = useState('');
     const [error, setError] = useState('');
     const [createdPlaylist, setCreatedPlaylist] = useState(null);
@@ -875,7 +898,7 @@ function PlaylistCreator() {
         
         setCreatedPlaylist(newPlaylist);
         setStatus('WQXR playlist created successfully!');
-        setPlaylistsVersion(v => v + 1);
+        setLibraryVersion(v => v + 1);
         setIsWqxrLoading(false);
     };
     
@@ -946,7 +969,7 @@ function PlaylistCreator() {
                 const features = audioFeatures[track.id];
                 if (!features || features.tempo < (bpm - 5) || features.tempo > (bpm + 5)) return false;
              }
-             if (isGenreEnabled) {
+             if (isGenreEnabled && genre.trim() !== '') {
                 const trackGenres = track.artists.flatMap(artist => artistGenres.get(artist.id) || []);
                 if(!trackGenres.some(g => g.includes(genre.toLowerCase()))) return false;
              }
@@ -979,7 +1002,7 @@ function PlaylistCreator() {
 
         setCreatedPlaylist(newPlaylist);
         setStatus('Custom playlist created successfully!');
-        setPlaylistsVersion(v => v + 1);
+        setLibraryVersion(v => v + 1);
         resetCustomForm();
         setIsCustomLoading(false);
     };
@@ -1064,7 +1087,6 @@ function PlaylistCreator() {
         </div>
     );
 }
-
 
 
 
