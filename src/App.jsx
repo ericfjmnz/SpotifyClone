@@ -237,7 +237,9 @@ export default function App() {
             const playerInstance = new window.Spotify.Player({
                 name: 'React Spotify Clone',
                 getOAuthToken: cb => { cb(token); },
-                volume: 0.5
+                volume: 0.5,
+                // **FIX**: Add recommended getRobustnessLevel property
+                getRobustnessLevel: () => Promise.resolve('low'),
             });
 
             setPlayer(playerInstance);
@@ -446,7 +448,7 @@ const useSpotifyApi = (url) => {
                     }
                 });
                 if (response.status === 401) {
-                    logout(); // **FIX**: Token is bad, logout user
+                    logout();
                     return;
                 }
                 if (!response.ok) {
@@ -503,8 +505,16 @@ function PlaylistCard({ imageUrl, title, subtitle, isArtist = false }) {
 }
 
 function HomePage() {
-    const { data: profile, loading: profileLoading, error: profileError } = useSpotifyApi('/me');
-    const { data: featuredPlaylistsData, loading: playlistsLoading, error: playlistsError } = useSpotifyApi('/browse/featured-playlists?limit=5');
+    const { data: profile } = useSpotifyApi('/me');
+    const [featuredPlaylistsUrl, setFeaturedPlaylistsUrl] = useState(null);
+    
+    useEffect(() => {
+        if(profile?.country) {
+            setFeaturedPlaylistsUrl(`/browse/featured-playlists?country=${profile.country}&limit=5`);
+        }
+    }, [profile]);
+    
+    const { data: featuredPlaylistsData, loading: playlistsLoading, error: playlistsError } = useSpotifyApi(featuredPlaylistsUrl);
     const { data: topArtists, loading: artistsLoading, error: artistsError } = useSpotifyApi('/me/top/artists?limit=5');
     const { data: recent, loading: recentLoading, error: recentError } = useSpotifyApi('/me/player/recently-played?limit=6');
 
@@ -514,12 +524,6 @@ function HomePage() {
         if (hour < 18) return "Good afternoon";
         return "Good evening";
     };
-
-    const isLoading = profileLoading || playlistsLoading || artistsLoading || recentLoading;
-
-    if (isLoading) {
-        return <div className="text-white text-center p-10">Loading your space...</div>;
-    }
 
     return (
         <div className="space-y-12">
