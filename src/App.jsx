@@ -159,6 +159,7 @@ export default function App() {
     const [isPaused, setIsPaused] = useState(true);
     const [position, setPosition] = useState(0);
     const [sdkLoaded, setSdkLoaded] = useState(false);
+    const [playlistsVersion, setPlaylistsVersion] = useState(0); // **FIX**: State to trigger playlist refresh
 
     const logout = useCallback(() => {
         setToken(null);
@@ -297,7 +298,7 @@ export default function App() {
     }
 
     return (
-        <AppContext.Provider value={{ token, view, setView, selectedPlaylistId, setSelectedPlaylistId, player, isPlayerReady, currentTrack, isPaused, logout, deviceId, position }}>
+        <AppContext.Provider value={{ token, view, setView, selectedPlaylistId, setSelectedPlaylistId, player, isPlayerReady, currentTrack, isPaused, logout, deviceId, position, playlistsVersion, setPlaylistsVersion }}>
             <div className="h-screen w-full flex flex-col bg-black text-white font-sans">
                 <div className="flex flex-1 overflow-y-hidden">
                     <Sidebar />
@@ -313,8 +314,9 @@ export default function App() {
 // --- Layout Components ---
 
 function Sidebar() {
-    const { view, setView, selectedPlaylistId, setSelectedPlaylistId, logout } = useContext(AppContext);
-    const { data: playlists, loading: playlistsLoading } = useSpotifyApi('/me/playlists');
+    const { view, setView, selectedPlaylistId, setSelectedPlaylistId, logout, playlistsVersion } = useContext(AppContext);
+    // **FIX**: The URL now includes the playlistsVersion, so this hook will re-run when it changes.
+    const { data: playlists, loading: playlistsLoading } = useSpotifyApi(`/me/playlists?v=${playlistsVersion}`);
     
     const NavItem = ({ label, targetView, icon }) => (
          <li
@@ -340,7 +342,7 @@ function Sidebar() {
                  <ul className="space-y-2">
                     <NavItem label="Home" targetView="home" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="currentColor" viewBox="0 0 16 16"><path d="M8.354 1.146a.5.5 0 0 0-.708 0l-6 6A.5.5 0 0 0 1.5 7.5v7a.5.5 0 0 0 .5.5h4.5a.5.5 0 0 0 .5-.5v-4h2v4a.5.5 0 0 0 .5.5H14a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.146-.354L8.354 1.146zM2.5 14V7.707l5.5-5.5 5.5 5.5V14H10v-4a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 0-.5.5v4H2.5z"/></svg>} />
                     <NavItem label="Search" targetView="search" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="currentColor" viewBox="0 0 16 16"><path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/></svg>} />
-                     <NavItem label="Playlist Creator" targetView="creator" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="currentColor" viewBox="0 0 16 16"><path d="M6 13c0 1.105-1.12 2-2.5 2S1 14.105 1 13c0-1.104 1.12-2 2.5-2s2.5.896 2.5 2zM1 7v2h6V7H1zm6-2v2H1V5h6zm1-2v2H1V3h6zm1-2v2H1V1h6zm1 10.117V15h8v-1.883l-4-3.117-4 3.117zM15.5 9a.5.5 0 0 1-.5.5h-8a.5.5 0 0 1-.5-.5V3.334l4-3.117 4 3.117V9z"/></svg>} />
+                    <NavItem label="Playlist Creator" targetView="creator" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="currentColor" viewBox="0 0 16 16"><path d="M6 13c0 1.105-1.12 2-2.5 2S1 14.105 1 13c0-1.104 1.12-2 2.5-2s2.5.896 2.5 2zM1 7v2h6V7H1zm6-2v2H1V5h6zm1-2v2H1V3h6zm1-2v2H1V1h6zm1 10.117V15h8v-1.883l-4-3.117-4 3.117zM15.5 9a.5.5 0 0 1-.5.5h-8a.5.5 0 0 1-.5-.5V3.334l4-3.117 4 3.117V9z"/></svg>} />
                 </ul>
             </div>
             <div className="bg-[#121212] rounded-lg p-2 mt-2 flex-1 overflow-y-auto">
@@ -412,7 +414,7 @@ function RightSidebar() {
 
 function VolumeControl() {
     const { player } = useContext(AppContext);
-    const [volume, setVolume] = useState(50); // Initial volume state
+    const [volume, setVolume] = useState(50);
 
     const handleVolumeChange = (e) => {
         const newVolume = e.target.value;
@@ -746,7 +748,7 @@ function PlaylistView({ playlistId }) {
 }
 
 function PlaylistCreator() {
-    const { token } = useContext(AppContext);
+    const { token, setPlaylistsVersion } = useContext(AppContext);
     const { data: profile } = useSpotifyApi('/me');
     const [status, setStatus] = useState('');
     const [createdPlaylist, setCreatedPlaylist] = useState(null);
@@ -764,12 +766,14 @@ function PlaylistCreator() {
     const { year, month, day } = getYesterdayDateParts();
 
     const handleCreatePlaylist = async () => {
+        if(!profile) {
+            setStatus('Could not get user profile. Please try again.');
+            return;
+        }
         setIsLoading(true);
         setCreatedPlaylist(null);
         setStatus('Starting process...');
 
-        // NOTE: This part is simulated. A real app would need a backend proxy
-        // to fetch from the WQXR URL due to browser CORS restrictions.
         setStatus('Simulating fetch from WQXR...');
         const simulatedTracks = [
             { title: 'Symphony No. 5', composer: 'Beethoven' },
@@ -826,6 +830,7 @@ function PlaylistCreator() {
         
         setCreatedPlaylist(newPlaylist);
         setStatus('Playlist created successfully!');
+        setPlaylistsVersion(v => v + 1); // **FIX**: Trigger a refresh of the playlist in the sidebar
         setIsLoading(false);
     };
 
