@@ -882,7 +882,6 @@ function PlaylistCreator() {
         setStatus('Asking AI for song ideas... This may take a moment.');
 
         try {
-            // **FIX**: Gemini API Integration
             const geminiPrompt = `Based on the following theme: "${aiPrompt}", generate a list of 15 suitable songs. Include a mix of popular and less common tracks if possible.`;
             let chatHistory = [{ role: "user", parts: [{ text: geminiPrompt }] }];
             const payload = {
@@ -916,7 +915,10 @@ function PlaylistCreator() {
                 body: JSON.stringify(payload)
             });
             
-            if(!geminiResponse.ok) throw new Error("AI request failed.");
+            if (geminiResponse.status === 403) {
+                 throw new Error("AI request failed: API key is invalid or missing permissions. This is an environment configuration issue.");
+            }
+            if(!geminiResponse.ok) throw new Error(`AI request failed with status: ${geminiResponse.status}`);
 
             const result = await geminiResponse.json();
             const songsText = result.candidates[0].content.parts[0].text;
@@ -970,7 +972,7 @@ function PlaylistCreator() {
             setIsCustomLoading(false);
 
         } catch (e) {
-            setError('An error occurred while creating the custom playlist. Please check the console for details.');
+            setError(e.message);
             console.error(e);
             setIsCustomLoading(false);
         }
