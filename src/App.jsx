@@ -146,6 +146,16 @@ export default function App() {
     const [isLoading, setIsLoading] = useState(true);
     const [view, setView] = useState('home'); 
 
+    // **FIX**: Dynamically load Tailwind CSS
+    useEffect(() => {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.tailwindcss.com';
+        document.head.appendChild(script);
+
+        // This is a common pattern, but be aware it relies on the CDN script loading and parsing.
+        // For production apps, integrating Tailwind into the build process is preferred.
+    }, []);
+
     useEffect(() => {
         const clientId = window.localStorage.getItem("spotify_client_id");
         const params = new URLSearchParams(window.location.search);
@@ -215,7 +225,7 @@ export default function App() {
 
     return (
         <AppContext.Provider value={{ token, view, setView }}>
-            <div className="h-screen w-full flex flex-col bg-black text-white">
+            <div className="h-screen w-full flex flex-col bg-black text-white font-sans">
                 <div className="flex flex-1 overflow-y-hidden">
                     <Sidebar logout={logout} />
                     <MainContent />
@@ -243,18 +253,18 @@ function Sidebar({ logout }) {
     );
 
     return (
-        <nav className="w-64 bg-black p-2 flex-shrink-0 flex flex-col">
+        <nav className="w-64 bg-black p-2 flex-shrink-0 flex-col hidden sm:flex">
             <div className="bg-[#121212] rounded-lg p-2">
                  <ul className="space-y-2">
                     <NavItem label="Home" targetView="home" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="currentColor" viewBox="0 0 16 16"><path d="M8.354 1.146a.5.5 0 0 0-.708 0l-6 6A.5.5 0 0 0 1.5 7.5v7a.5.5 0 0 0 .5.5h4.5a.5.5 0 0 0 .5-.5v-4h2v4a.5.5 0 0 0 .5.5H14a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.146-.354L8.354 1.146zM2.5 14V7.707l5.5-5.5 5.5 5.5V14H10v-4a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 0-.5.5v4H2.5z"/></svg>} />
                     <NavItem label="Search" targetView="search" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="currentColor" viewBox="0 0 16 16"><path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/></svg>} />
                 </ul>
             </div>
-            <div className="bg-[#121212] rounded-lg p-2 mt-2 flex-1">
+            <div className="bg-[#121212] rounded-lg p-2 mt-2 flex-1 overflow-y-auto">
                  {/* Library Section Placeholder */}
                  <p className="text-gray-400 p-2">Your Library</p>
             </div>
-             <div className="mt-auto">
+             <div className="mt-auto pt-2">
                  <button onClick={logout} className="w-full text-left text-gray-400 hover:text-white p-4">Logout</button>
             </div>
         </nav>
@@ -296,7 +306,7 @@ function RightSidebar() {
 
 function PlayerBar() {
     return (
-        <footer className="h-24 bg-black border-t border-gray-900 flex items-center justify-between px-4 text-white">
+        <footer className="h-24 bg-black border-t border-gray-800 flex items-center justify-between px-4 text-white">
             <div className="w-1/4">
                 <p className="font-semibold">I Want To Hold Your Hand</p>
                 <p className="text-xs text-gray-400">The Beatles</p>
@@ -376,7 +386,6 @@ function ContentSection({ title, children }) {
 }
 
 function PlaylistCard({ imageUrl, title, subtitle, isArtist = false }) {
-    const cardClasses = isArtist ? "p-4 rounded-full" : "p-4 rounded-lg";
     const imageClasses = isArtist ? "rounded-full shadow-lg" : "rounded-md shadow-lg";
 
     return (
@@ -486,5 +495,6 @@ function PlaylistCurator() {
         </div>
     );
 }
+
 
 
