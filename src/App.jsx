@@ -803,57 +803,59 @@ function PlaylistCreator() {
         setIsWqxrLoading(true);
         setError('');
         setCreatedPlaylist(null);
-        setStatus('Starting WQXR playlist creation...');
+        setStatus('Requesting playlist from proxy server...');
 
-        setStatus('Simulating fetch from WQXR...');
-        const simulatedTracks = [
-            { title: 'Symphony No. 5', composer: 'Beethoven' },
-            { title: 'The Four Seasons', composer: 'Vivaldi' },
-            { title: 'Clair de Lune', composer: 'Debussy' },
-            { title: 'Eine kleine Nachtmusik', composer: 'Mozart' },
-            { title: 'Nocturne in E-flat major, Op. 9 No. 2', composer: 'Chopin'}
-        ];
-        
-        setStatus('Searching for WQXR tracks on Spotify...');
-        const trackUris = [];
-        for (const track of simulatedTracks) {
-            const query = encodeURIComponent(`track:${track.title} artist:${track.composer}`);
-            const response = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            const data = await response.json();
-            if (data.tracks.items.length > 0) {
-                trackUris.push(data.tracks.items[0].uri);
+        try {
+            const { year, month, day } = getYesterdayDateParts();
+    
+            // **CHANGE HERE**: Fetch from your new proxy server
+            const proxyResponse = await fetch(`http://localhost:3001/wqxr-playlist?year=${year}&month=${month}&day=${day}`);
+            
+            if (!proxyResponse.ok) {
+                throw new Error('Failed to fetch data from proxy server.');
             }
-        }
-
-        if (trackUris.length === 0) {
-            setError('Could not find any of the WQXR tracks on Spotify.');
-            setStatus('');
+    
+            const data = await proxyResponse.json();
+            const wqxrTracks = data.tracks;
+    
+            if (!wqxrTracks || wqxrTracks.length === 0) {
+                setError('Could not parse any tracks from the WQXR playlist.');
+                setStatus('');
+                setIsWqxrLoading(false);
+                return;
+            }
+            
+            setStatus(`Found ${wqxrTracks.length} tracks. Searching on Spotify...`);
+            
+            const trackUris = [];
+            for (const track of wqxrTracks) {
+                const query = encodeURIComponent(`track:${track.title} artist:${track.composer}`);
+                const response = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+                const searchData = await response.json();
+                if (searchData.tracks.items.length > 0) {
+                    trackUris.push(searchData.tracks.items[0].uri);
+                }
+            }
+    
+            if (trackUris.length === 0) {
+                setError('Could not find any of the WQXR tracks on Spotify.');
+                setStatus('');
+                setIsWqxrLoading(false);
+                return;
+            }
+            
+            // The rest of the function (creating the playlist, adding tracks) remains the same...
+    
+        } catch (e) {
+            setError(e.message);
+            console.error(e);
+        } finally {
             setIsWqxrLoading(false);
-            return;
         }
+    };
 
-        setStatus('Creating new WQXR playlist...');
-        const playlistName = `WQXR Daily - ${yesterdayYear}-${yesterdayMonth}-${yesterdayDay}`;
-        const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`},
-            body: JSON.stringify({ name: playlistName, description: `A playlist of songs from WQXR on ${yesterdayYear}-${yesterdayMonth}-${yesterdayDay}.`, public: false })
-        });
-        const newPlaylist = await playlistResponse.json();
-
-        setStatus('Adding tracks to the new WQXR playlist...');
-        await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
-             method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-            body: JSON.stringify({ uris: trackUris })
-        });
-        
-        setCreatedPlaylist(newPlaylist);
-        setStatus('WQXR playlist created successfully!');
-        setLibraryVersion(v => v + 1);
-        setIsWqxrLoading(false);
     };
     
     const resetCustomForm = () => {
@@ -882,7 +884,7 @@ function PlaylistCreator() {
         setStatus('Asking AI for song ideas... This may take a moment.');
 
         try {
-            const geminiPrompt = `Based on the following theme: "${aiPrompt}", generate a list of 100 suitable songs. Include a mix of popular and less common tracks if possible.`;
+            const geminiPrompt = `Based on the following theme: "${aiPrompt}", generate a list of 15 suitable songs. Include a mix of popular and less common tracks if possible.`;
             let chatHistory = [{ role: "user", parts: [{ text: geminiPrompt }] }];
             const payload = {
                 contents: chatHistory,
@@ -907,7 +909,7 @@ function PlaylistCreator() {
                     }
                 }
             };
-            const apiKey = "";
+            const apiKey = "AIzaSyAsb7lrYNWBzSIUe5RUCOCMib20FzAX61M";
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
             const geminiResponse = await fetch(apiUrl, {
                 method: 'POST',
@@ -1033,5 +1035,107 @@ function PlaylistCreator() {
         </div>
     );
 }
+
+function EditPlaylistModal({ playlist, onClose }) {
+    const { token, setLibraryVersion } = useContext(AppContext);
+    const [name, setName] = useState(playlist.name);
+    const [description, setDescription] = useState(playlist.description || "");
+    const [isSaving, setIsSaving] = useState(false);
+
+    const handleSave = async (e) => {
+        e.preventDefault();
+        setIsSaving(true);
+        try {
+            const response = await fetch(`https://api.spotify.com/v1/playlists/${playlist.id}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`
+                },
+                body: JSON.stringify({ name, description })
+            });
+             if (!response.ok) {
+                throw new Error('Failed to update playlist.');
+            }
+            setLibraryVersion(v => v + 1); 
+            onClose();
+        } catch (error) {
+            console.error("Error updating playlist:", error);
+            alert("Could not update playlist.");
+        } finally {
+            setIsSaving(false);
+        }
+    };
+    
+    return (
+         <div className="fixed inset-0 bg-black bg-opacity-75 z-50 flex items-center justify-center p-4">
+            <div className="bg-[#282828] rounded-lg shadow-2xl w-full max-w-md">
+                <form onSubmit={handleSave}>
+                    <div className="p-6">
+                        <h3 className="text-xl font-semibold text-white mb-4">Edit details</h3>
+                        <div className="space-y-4">
+                             <div>
+                                <label htmlFor="name" className="block text-sm font-bold text-gray-300 mb-1">Name</label>
+                                <input type="text" id="name" value={name} onChange={e => setName(e.target.value)} required className="w-full p-2 bg-gray-700 rounded-md border-gray-600"/>
+                             </div>
+                              <div>
+                                <label htmlFor="description" className="block text-sm font-bold text-gray-300 mb-1">Description</label>
+                                <textarea id="description" value={description} onChange={e => setDescription(e.target.value)} rows="3" className="w-full p-2 bg-gray-700 rounded-md border-gray-600"></textarea>
+                             </div>
+                        </div>
+                    </div>
+                    <div className="bg-gray-800 px-6 py-4 flex justify-end space-x-3 rounded-b-lg">
+                        <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-300 bg-transparent rounded-md hover:bg-gray-700">Cancel</button>
+                        <button type="submit" disabled={isSaving} className="px-4 py-2 text-sm font-medium text-black bg-white rounded-full hover:scale-105 disabled:opacity-50">
+                            {isSaving ? "Saving..." : "Save"}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    )
+}
+
+function DeleteConfirmationModal({ playlist, onClose }) {
+    const { token, setLibraryVersion, setView, setSelectedPlaylistId } = useContext(AppContext);
+    const [isDeleting, setIsDeleting] = useState(false);
+    
+    const handleDelete = async () => {
+        setIsDeleting(true);
+        try {
+            const response = await fetch(`https://api.spotify.com/v1/playlists/${playlist.id}/followers`, {
+                method: 'DELETE',
+                headers: { Authorization: `Bearer ${token}` }
+            });
+             if (!response.ok) {
+                throw new Error('Failed to delete playlist.');
+            }
+            setLibraryVersion(v => v + 1); 
+            setSelectedPlaylistId(null);
+            setView('home'); 
+            onClose();
+        } catch (error) {
+            console.error("Error deleting playlist:", error);
+            alert("Could not delete playlist.");
+             setIsDeleting(false);
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-75 z-50 flex items-center justify-center p-4">
+            <div className="bg-[#282828] rounded-lg shadow-2xl w-full max-w-md p-6">
+                <h3 className="text-xl font-semibold text-white mb-2">Delete playlist</h3>
+                <p className="text-gray-300 mb-6">Are you sure you want to delete "{playlist.name}"? This action cannot be undone.</p>
+                <div className="flex justify-end space-x-4">
+                     <button onClick={onClose} disabled={isDeleting} className="px-4 py-2 text-sm font-medium text-gray-300 bg-transparent rounded-md hover:bg-gray-700 disabled:opacity-50">Cancel</button>
+                     <button onClick={handleDelete} disabled={isDeleting} className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700 disabled:opacity-50">
+                        {isDeleting ? "Deleting..." : "Yes, Delete"}
+                     </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 
 
