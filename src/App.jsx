@@ -154,7 +154,7 @@ export default function App() {
     const [selectedPlaylistId, setSelectedPlaylistId] = useState(null);
     const [player, setPlayer] = useState(null);
     const [isPlayerReady, setIsPlayerReady] = useState(false);
-    const [deviceId, setDeviceId] = useState(null); // **FIX**: State to hold the device ID
+    const [deviceId, setDeviceId] = useState(null);
     const [currentTrack, setCurrentTrack] = useState(null);
     const [isPaused, setIsPaused] = useState(true);
     const [sdkLoaded, setSdkLoaded] = useState(false);
@@ -251,7 +251,7 @@ export default function App() {
 
             playerInstance.addListener('ready', ({ device_id }) => {
                 setIsPlayerReady(true);
-                setDeviceId(device_id); // **FIX**: Save the device ID
+                setDeviceId(device_id);
             });
             playerInstance.addListener('not_ready', ({ device_id }) => {
                  setIsPlayerReady(false);
@@ -590,10 +590,9 @@ function HomePage() {
 
 function PlaylistView({ playlistId }) {
     const { data: playlist, loading } = useSpotifyApi(`/playlists/${playlistId}`);
-    const { token, deviceId } = useContext(AppContext); // **FIX**: Get deviceId from context
+    const { token, deviceId, currentTrack, isPaused } = useContext(AppContext);
 
     const playTrack = (trackUri) => {
-        // **FIX**: Check for deviceId before attempting to play
         if (!deviceId) {
             alert("No active player found. Please open Spotify on a device.");
             return;
@@ -606,6 +605,12 @@ function PlaylistView({ playlistId }) {
             },
             body: JSON.stringify({ uris: [trackUri] })
         });
+    };
+
+    const formatDuration = (ms) => {
+        const minutes = Math.floor(ms / 60000);
+        const seconds = ((ms % 60000) / 1000).toFixed(0);
+        return `${minutes}:${(seconds < 10 ? '0' : '')}${seconds}`;
     };
 
     if (loading) return <div className="text-center p-10">Loading playlist...</div>;
@@ -624,20 +629,36 @@ function PlaylistView({ playlistId }) {
             
             <div>
                 {playlist.tracks.items.map(({ track }, index) => {
-                    if(!track) return null; // Add guard for null tracks
+                    if(!track) return null;
+                    const isPlaying = currentTrack?.uri === track.uri && !isPaused;
+
                     return (
-                        <div key={track.id + index} className="grid grid-cols-[auto,1fr,auto] items-center gap-4 p-2 rounded-md hover:bg-white/10 group">
-                            <div className="text-gray-400 w-8 text-center">{index + 1}</div>
+                        <div 
+                            key={track.id + index} 
+                            className="grid grid-cols-[auto,1fr,auto] items-center gap-4 p-2 rounded-md hover:bg-white/10 group"
+                            onDoubleClick={() => playTrack(track.uri)}
+                        >
+                            <div className="text-gray-400 w-8 text-center flex items-center justify-center">
+                               { isPlaying ?
+                                    ( <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-green-500 animate-pulse"><path d="M2.69231 6.30769V9.69231H0V6.30769H2.69231ZM6.76923 12.4615V3.53846H4.07692V12.4615H6.76923ZM10.8462 16V0H8.15385V16H10.8462ZM14.9231 12.4615V3.53846H12.2308V12.4615H14.9231Z" fill="currentColor"/></svg> ) :
+                                    ( <>
+                                        <span className="group-hover:hidden">{index + 1}</span>
+                                        <button onClick={() => playTrack(track.uri)} className="text-white hidden group-hover:block">
+                                            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                                        </button>
+                                    </> )
+                                }
+                            </div>
                             <div className="flex items-center gap-4">
-                                <img src={track.album.images[2]?.url} alt="" className="w-10 h-10"/>
+                                <img src={track.album.images[2]?.url || 'https://placehold.co/40x40/181818/FFFFFF?text=...'} alt={track.name} className="w-10 h-10"/>
                                 <div>
-                                    <p className="font-semibold text-white">{track.name}</p>
+                                    <p className={`font-semibold ${isPlaying ? 'text-green-500' : 'text-white'}`}>{track.name}</p>
                                     <p className="text-sm text-gray-400">{track.artists.map(a => a.name).join(', ')}</p>
                                 </div>
                             </div>
-                            <button onClick={() => playTrack(track.uri)} className="text-white opacity-0 group-hover:opacity-100">
-                                 <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                            </button>
+                            <div className="text-sm text-gray-400">
+                                {formatDuration(track.duration_ms)}
+                            </div>
                         </div>
                     );
                 })}
