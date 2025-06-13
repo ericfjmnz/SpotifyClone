@@ -1034,7 +1034,7 @@ function PlaylistCreator() {
             )}
         </div>
     );
-}
+
 
 function EditPlaylistModal({ playlist, onClose }) {
     const { token, setLibraryVersion } = useContext(AppContext);
