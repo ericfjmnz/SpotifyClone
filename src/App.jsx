@@ -169,8 +169,12 @@ export default function App() {
         setSelectedPlaylistId(null);
     }, [player]);
 
-    // Effect for loading external Spotify SDK
+    // Effect for loading external Spotify SDK and Tailwind CSS
     useEffect(() => {
+        const tailwindScript = document.createElement('script');
+        tailwindScript.src = 'https://cdn.tailwindcss.com';
+        document.head.appendChild(tailwindScript);
+
         window.onSpotifyWebPlaybackSDKReady = () => {
             setSdkLoaded(true);
         };
@@ -179,6 +183,7 @@ export default function App() {
         sdkScript.src = "https://sdk.scdn.co/spotify-player.js";
         sdkScript.async = true;
         document.body.appendChild(sdkScript);
+
     }, []);
 
     // Effect for handling authentication token
