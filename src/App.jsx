@@ -750,10 +750,17 @@ function PlaylistCreator() {
     const { token, setPlaylistsVersion } = useContext(AppContext);
     const { data: profile } = useSpotifyApi('/me');
     const [status, setStatus] = useState('');
+    const [error, setError] = useState('');
     const [createdPlaylist, setCreatedPlaylist] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
+    
+    // State for Custom Playlist
+    const [customPlaylistName, setCustomPlaylistName] = useState('');
+    const [isGenreEnabled, setIsGenreEnabled] = useState(false);
     const [genre, setGenre] = useState('');
+    const [isYearEnabled, setIsYearEnabled] = useState(false);
     const [year, setYear] = useState('');
+    const [isBpmEnabled, setIsBpmEnabled] = useState(false);
     const [bpm, setBpm] = useState(120);
 
     const getYesterdayDateParts = () => {
@@ -773,6 +780,7 @@ function PlaylistCreator() {
             return;
         }
         setIsLoading(true);
+        setError('');
         setCreatedPlaylist(null);
         setStatus('Starting WQXR playlist creation...');
 
@@ -799,7 +807,8 @@ function PlaylistCreator() {
         }
 
         if (trackUris.length === 0) {
-            setStatus('Could not find any of the WQXR tracks on Spotify.');
+            setError('Could not find any of the WQXR tracks on Spotify.');
+            setStatus('');
             setIsLoading(false);
             return;
         }
@@ -835,11 +844,107 @@ function PlaylistCreator() {
         setPlaylistsVersion(v => v + 1);
         setIsLoading(false);
     };
+    
+    const resetCustomForm = () => {
+        setCustomPlaylistName('');
+        setGenre('');
+        setYear('');
+        setBpm(120);
+        setIsGenreEnabled(false);
+        setIsYearEnabled(false);
+        setIsBpmEnabled(false);
+    };
 
     const handleCreateCustomPlaylist = async () => {
-       // Placeholder for future implementation
-       alert("This feature is coming soon!");
+        setError('');
+        if (!isGenreEnabled && !isYearEnabled && !isBpmEnabled) {
+            setError('Please enable and set at least one filter.');
+            return;
+        }
+        if (!customPlaylistName.trim()) {
+            setError('Playlist name cannot be empty.');
+            return;
+        }
+        if(!profile) {
+            setError('Could not get user profile. Please try again.');
+            return;
+        }
+        setIsLoading(true);
+        setCreatedPlaylist(null);
+        setStatus('Scanning your library... This may take a moment.');
+
+        let allTracks = [];
+        let nextUrl = 'https://api.spotify.com/v1/me/tracks?limit=50';
+        while(nextUrl) {
+            const response = await fetch(nextUrl, { headers: { Authorization: `Bearer ${token}` } });
+            const data = await response.json();
+            allTracks = [...allTracks, ...data.items];
+            nextUrl = data.next;
+        }
+        
+        setStatus(`Found ${allTracks.length} tracks. Fetching audio features...`);
+
+        const trackIds = allTracks.map(item => item.track.id).filter(id => id); // Filter out null ids
+        let audioFeatures = {};
+        for (let i = 0; i < trackIds.length; i += 100) {
+            const batch = trackIds.slice(i, i + 100);
+            const featuresResponse = await fetch(`https://api.spotify.com/v1/audio-features?ids=${batch.join(',')}`, {
+                 headers: { Authorization: `Bearer ${token}` }
+            });
+            const featuresData = await featuresResponse.json();
+            featuresData.audio_features.forEach(feature => {
+                if(feature) audioFeatures[feature.id] = feature;
+            });
+        }
+        
+        setStatus('Filtering tracks...');
+        let filteredTracks = allTracks.filter(item => {
+             if(!item.track) return false;
+             const track = item.track;
+             const features = audioFeatures[track.id];
+             if(!features) return false;
+
+             if(isYearEnabled && track.album.release_date.substring(0, 4) !== year) {
+                 return false;
+             }
+             if(isBpmEnabled && (features.tempo < (bpm - 5) || features.tempo > (bpm + 5))) {
+                 return false;
+             }
+             // Genre filtering is complex and deferred.
+             return true;
+        });
+
+        const filteredUris = filteredTracks.map(item => item.track.uri);
+        
+        if (filteredUris.length === 0) {
+            setError('No tracks in your library matched the selected criteria.');
+            setStatus('');
+            setIsLoading(false);
+            return;
+        }
+
+        setStatus(`Creating playlist "${customPlaylistName}"...`);
+        const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ name: customPlaylistName, public: false })
+        });
+        const newPlaylist = await playlistResponse.json();
+
+        setStatus(`Adding ${filteredUris.length} songs...`);
+        await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ uris: filteredUris })
+        });
+
+        setCreatedPlaylist(newPlaylist);
+        setStatus('Custom playlist created successfully!');
+        setPlaylistsVersion(v => v + 1);
+        resetCustomForm();
+        setIsLoading(false);
     };
+
 
     return (
         <div className="space-y-8">
@@ -864,28 +969,36 @@ function PlaylistCreator() {
                  <p className="text-gray-400 mb-4">
                     Create a new playlist from your saved songs based on a specific genre, year, or BPM.
                 </p>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                <div className="space-y-4">
                      <div>
-                        <label className="block mb-1 text-sm font-medium text-gray-300">Genre</label>
-                        <input type="text" value={genre} onChange={e => setGenre(e.target.value)} placeholder="e.g., rock, electronic" className="w-full p-2 bg-gray-700 rounded-md border-gray-600" />
+                        <label className="block mb-1 text-sm font-medium text-gray-300">Playlist Name</label>
+                        <input type="text" value={customPlaylistName} onChange={e => setCustomPlaylistName(e.target.value)} placeholder="My Awesome Mix" className="w-full p-2 bg-gray-700 rounded-md border-gray-600" />
                     </div>
-                     <div>
-                        <label className="block mb-1 text-sm font-medium text-gray-300">Year</label>
-                        <input type="number" value={year} onChange={e => setYear(e.target.value)} placeholder="e.g., 1995" className="w-full p-2 bg-gray-700 rounded-md border-gray-600" />
+                    <div className="flex items-center gap-4">
+                        <input type="checkbox" id="genre-toggle" checked={isGenreEnabled} onChange={() => setIsGenreEnabled(!isGenreEnabled)} className="h-4 w-4 rounded text-green-500 focus:ring-green-500 border-gray-500"/>
+                        <label htmlFor="genre-toggle" className="flex-1 text-sm font-medium text-gray-300">Genre</label>
+                        <input type="text" value={genre} onChange={e => setGenre(e.target.value)} placeholder="e.g., rock, electronic" className="w-full p-2 bg-gray-700 rounded-md border-gray-600 disabled:bg-gray-600" disabled={!isGenreEnabled} />
                     </div>
-                     <div>
-                        <label className="block mb-1 text-sm font-medium text-gray-300">BPM (approx.)</label>
-                         <input type="number" value={bpm} onChange={e => setBpm(e.target.value)} placeholder="e.g., 120" className="w-full p-2 bg-gray-700 rounded-md border-gray-600" />
+                     <div className="flex items-center gap-4">
+                        <input type="checkbox" id="year-toggle" checked={isYearEnabled} onChange={() => setIsYearEnabled(!isYearEnabled)} className="h-4 w-4 rounded text-green-500 focus:ring-green-500 border-gray-500"/>
+                        <label htmlFor="year-toggle" className="flex-1 text-sm font-medium text-gray-300">Year</label>
+                        <input type="number" value={year} onChange={e => setYear(e.target.value)} placeholder="e.g., 1995" className="w-full p-2 bg-gray-700 rounded-md border-gray-600 disabled:bg-gray-600" disabled={!isYearEnabled} />
+                    </div>
+                     <div className="flex items-center gap-4">
+                        <input type="checkbox" id="bpm-toggle" checked={isBpmEnabled} onChange={() => setIsBpmEnabled(!isBpmEnabled)} className="h-4 w-4 rounded text-green-500 focus:ring-green-500 border-gray-500"/>
+                        <label htmlFor="bpm-toggle" className="flex-1 text-sm font-medium text-gray-300">BPM (±5)</label>
+                         <input type="number" value={bpm} onChange={e => setBpm(e.target.value)} placeholder="e.g., 120" className="w-full p-2 bg-gray-700 rounded-md border-gray-600 disabled:bg-gray-600" disabled={!isBpmEnabled}/>
                     </div>
                 </div>
                  <button 
                     onClick={handleCreateCustomPlaylist} 
                     disabled={isLoading}
-                    className="bg-green-600 hover:bg-green-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
+                    className="mt-6 bg-green-600 hover:bg-green-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
                 >
                     {isLoading ? 'Creating...' : "Create Custom Playlist"}
                 </button>
             </div>
+             {error && <p className="mt-4 text-red-500">{error}</p>}
              {status && <p className="mt-4 text-gray-300">{status}</p>}
              {createdPlaylist && (
                 <div className="mt-4">
