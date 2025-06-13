@@ -439,11 +439,12 @@ const useSpotifyApi = (url) => {
             };
             try {
                 setLoading(true);
-                const response = await fetch(`https://api.spotify.com/v1${url}`, {
+                // **FIX**: Append a timestamp to the URL to bust the cache
+                const cacheBustedUrl = `${url}${url.includes('?') ? '&' : '?'}t=${new Date().getTime()}`;
+                const response = await fetch(`https://api.spotify.com/v1${cacheBustedUrl}`, {
                     headers: {
                         Authorization: `Bearer ${token}`,
-                    },
-                    cache: 'no-cache',
+                    }
                 });
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
@@ -650,6 +651,7 @@ function PlaylistCurator() {
         </div>
     );
 }
+
 
 
 
