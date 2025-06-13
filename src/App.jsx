@@ -159,7 +159,7 @@ export default function App() {
     const [isPaused, setIsPaused] = useState(true);
     const [position, setPosition] = useState(0);
     const [sdkLoaded, setSdkLoaded] = useState(false);
-    const [playlistsVersion, setPlaylistsVersion] = useState(0); // **FIX**: State to trigger playlist refresh
+    const [playlistsVersion, setPlaylistsVersion] = useState(0);
 
     const logout = useCallback(() => {
         setToken(null);
@@ -315,7 +315,6 @@ export default function App() {
 
 function Sidebar() {
     const { view, setView, selectedPlaylistId, setSelectedPlaylistId, logout, playlistsVersion } = useContext(AppContext);
-    // **FIX**: The URL now includes the playlistsVersion, so this hook will re-run when it changes.
     const { data: playlists, loading: playlistsLoading } = useSpotifyApi(`/me/playlists?v=${playlistsVersion}`);
     
     const NavItem = ({ label, targetView, icon }) => (
@@ -753,6 +752,9 @@ function PlaylistCreator() {
     const [status, setStatus] = useState('');
     const [createdPlaylist, setCreatedPlaylist] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
+    const [genre, setGenre] = useState('');
+    const [year, setYear] = useState('');
+    const [bpm, setBpm] = useState(120);
 
     const getYesterdayDateParts = () => {
         const yesterday = new Date();
@@ -763,16 +765,16 @@ function PlaylistCreator() {
         return { year, month, day };
     };
 
-    const { year, month, day } = getYesterdayDateParts();
+    const { year: yesterdayYear, month: yesterdayMonth, day: yesterdayDay } = getYesterdayDateParts();
 
-    const handleCreatePlaylist = async () => {
+    const handleCreateWQXRPlaylist = async () => {
         if(!profile) {
             setStatus('Could not get user profile. Please try again.');
             return;
         }
         setIsLoading(true);
         setCreatedPlaylist(null);
-        setStatus('Starting process...');
+        setStatus('Starting WQXR playlist creation...');
 
         setStatus('Simulating fetch from WQXR...');
         const simulatedTracks = [
@@ -783,7 +785,7 @@ function PlaylistCreator() {
             { title: 'Nocturne in E-flat major, Op. 9 No. 2', composer: 'Chopin'}
         ];
         
-        setStatus('Searching for tracks on Spotify...');
+        setStatus('Searching for WQXR tracks on Spotify...');
         const trackUris = [];
         for (const track of simulatedTracks) {
             const query = encodeURIComponent(`track:${track.title} artist:${track.composer}`);
@@ -797,13 +799,13 @@ function PlaylistCreator() {
         }
 
         if (trackUris.length === 0) {
-            setStatus('Could not find any of the tracks on Spotify.');
+            setStatus('Could not find any of the WQXR tracks on Spotify.');
             setIsLoading(false);
             return;
         }
 
-        setStatus('Creating new playlist...');
-        const playlistName = `WQXR Daily - ${year}-${month}-${day}`;
+        setStatus('Creating new WQXR playlist...');
+        const playlistName = `WQXR Daily - ${yesterdayYear}-${yesterdayMonth}-${yesterdayDay}`;
         const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
             method: 'POST',
             headers: {
@@ -812,13 +814,13 @@ function PlaylistCreator() {
             },
             body: JSON.stringify({
                 name: playlistName,
-                description: `A playlist of songs from WQXR on ${year}-${month}-${day}. Created by React Spotify Client.`,
+                description: `A playlist of songs from WQXR on ${yesterdayYear}-${yesterdayMonth}-${yesterdayDay}. Created by React Spotify Client.`,
                 public: false
             })
         });
         const newPlaylist = await playlistResponse.json();
 
-        setStatus('Adding tracks to the new playlist...');
+        setStatus('Adding tracks to the new WQXR playlist...');
         await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
              method: 'POST',
             headers: {
@@ -829,35 +831,69 @@ function PlaylistCreator() {
         });
         
         setCreatedPlaylist(newPlaylist);
-        setStatus('Playlist created successfully!');
-        setPlaylistsVersion(v => v + 1); // **FIX**: Trigger a refresh of the playlist in the sidebar
+        setStatus('WQXR playlist created successfully!');
+        setPlaylistsVersion(v => v + 1);
         setIsLoading(false);
     };
 
+    const handleCreateCustomPlaylist = async () => {
+       // Placeholder for future implementation
+       alert("This feature is coming soon!");
+    };
+
     return (
-        <div>
+        <div className="space-y-8">
             <h1 className="text-3xl font-bold mb-4">Playlist Creator</h1>
+            
             <div className="bg-gray-800 p-6 rounded-lg">
                 <h2 className="text-xl font-semibold mb-2">WQXR Daily Playlist</h2>
                 <p className="text-gray-400 mb-4">
-                    Create a new playlist based on the music played yesterday ({day}-{month}-{year}) on WQXR.
+                    Create a new playlist based on the music played yesterday ({yesterdayDay}-{yesterdayMonth}-{yesterdayYear}) on WQXR.
                 </p>
                 <button 
-                    onClick={handleCreatePlaylist} 
+                    onClick={handleCreateWQXRPlaylist} 
                     disabled={isLoading}
                     className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
                 >
                     {isLoading ? 'Creating...' : "Create Yesterday's Playlist"}
                 </button>
-                {status && <p className="mt-4 text-gray-300">{status}</p>}
-                {createdPlaylist && (
-                    <div className="mt-4">
-                        <a href={createdPlaylist.external_urls.spotify} target="_blank" rel="noopener noreferrer" className="text-green-500 font-semibold hover:underline">
-                            Open your new playlist: "{createdPlaylist.name}"
-                        </a>
-                    </div>
-                )}
             </div>
+
+            <div className="bg-gray-800 p-6 rounded-lg">
+                <h2 className="text-xl font-semibold mb-2">Custom Playlist from Your Library</h2>
+                 <p className="text-gray-400 mb-4">
+                    Create a new playlist from your saved songs based on a specific genre, year, or BPM.
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                     <div>
+                        <label className="block mb-1 text-sm font-medium text-gray-300">Genre</label>
+                        <input type="text" value={genre} onChange={e => setGenre(e.target.value)} placeholder="e.g., rock, electronic" className="w-full p-2 bg-gray-700 rounded-md border-gray-600" />
+                    </div>
+                     <div>
+                        <label className="block mb-1 text-sm font-medium text-gray-300">Year</label>
+                        <input type="number" value={year} onChange={e => setYear(e.target.value)} placeholder="e.g., 1995" className="w-full p-2 bg-gray-700 rounded-md border-gray-600" />
+                    </div>
+                     <div>
+                        <label className="block mb-1 text-sm font-medium text-gray-300">BPM (approx.)</label>
+                         <input type="number" value={bpm} onChange={e => setBpm(e.target.value)} placeholder="e.g., 120" className="w-full p-2 bg-gray-700 rounded-md border-gray-600" />
+                    </div>
+                </div>
+                 <button 
+                    onClick={handleCreateCustomPlaylist} 
+                    disabled={isLoading}
+                    className="bg-green-600 hover:bg-green-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
+                >
+                    {isLoading ? 'Creating...' : "Create Custom Playlist"}
+                </button>
+            </div>
+             {status && <p className="mt-4 text-gray-300">{status}</p>}
+             {createdPlaylist && (
+                <div className="mt-4">
+                    <a href={createdPlaylist.external_urls.spotify} target="_blank" rel="noopener noreferrer" className="text-green-500 font-semibold hover:underline">
+                        Open your new playlist: "{createdPlaylist.name}"
+                    </a>
+                </div>
+            )}
         </div>
     );
 }
