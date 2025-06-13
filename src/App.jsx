@@ -15,6 +15,7 @@ const SCOPES = [
     "user-read-recently-played",
     "playlist-read-private",
     "playlist-read-collaborative",
+    "user-read-currently-playing", // **FIX**: Added scope for premium check
     // Scopes required for Web Playback SDK
     "streaming",
     "user-read-playback-state",
@@ -752,7 +753,8 @@ function PlaylistCreator() {
     const [status, setStatus] = useState('');
     const [error, setError] = useState('');
     const [createdPlaylist, setCreatedPlaylist] = useState(null);
-    const [isLoading, setIsLoading] = useState(false);
+    const [isWqxrLoading, setIsWqxrLoading] = useState(false);
+    const [isCustomLoading, setIsCustomLoading] = useState(false);
     
     // State for Custom Playlist
     const [customPlaylistName, setCustomPlaylistName] = useState('');
@@ -779,7 +781,7 @@ function PlaylistCreator() {
             setStatus('Could not get user profile. Please try again.');
             return;
         }
-        setIsLoading(true);
+        setIsWqxrLoading(true);
         setError('');
         setCreatedPlaylist(null);
         setStatus('Starting WQXR playlist creation...');
@@ -809,7 +811,7 @@ function PlaylistCreator() {
         if (trackUris.length === 0) {
             setError('Could not find any of the WQXR tracks on Spotify.');
             setStatus('');
-            setIsLoading(false);
+            setIsWqxrLoading(false);
             return;
         }
 
@@ -842,7 +844,7 @@ function PlaylistCreator() {
         setCreatedPlaylist(newPlaylist);
         setStatus('WQXR playlist created successfully!');
         setPlaylistsVersion(v => v + 1);
-        setIsLoading(false);
+        setIsWqxrLoading(false);
     };
     
     const resetCustomForm = () => {
@@ -869,7 +871,7 @@ function PlaylistCreator() {
             setError('Could not get user profile. Please try again.');
             return;
         }
-        setIsLoading(true);
+        setIsCustomLoading(true);
         setCreatedPlaylist(null);
         setStatus('Scanning your library... This may take a moment.');
 
@@ -878,13 +880,14 @@ function PlaylistCreator() {
         while(nextUrl) {
             const response = await fetch(nextUrl, { headers: { Authorization: `Bearer ${token}` } });
             const data = await response.json();
-            allTracks = [...allTracks, ...data.items];
+            const validItems = data.items.filter(item => item.track); // Filter out items without a track object
+            allTracks = [...allTracks, ...validItems];
             nextUrl = data.next;
         }
         
         setStatus(`Found ${allTracks.length} tracks. Fetching audio features...`);
 
-        const trackIds = allTracks.map(item => item.track.id).filter(id => id); // Filter out null ids
+        const trackIds = allTracks.map(item => item.track.id).filter(id => id); 
         let audioFeatures = {};
         for (let i = 0; i < trackIds.length; i += 100) {
             const batch = trackIds.slice(i, i + 100);
@@ -892,15 +895,18 @@ function PlaylistCreator() {
                  headers: { Authorization: `Bearer ${token}` }
             });
             const featuresData = await featuresResponse.json();
-            featuresData.audio_features.forEach(feature => {
-                if(feature) audioFeatures[feature.id] = feature;
-            });
+            // **FIX**: Check if audio_features exists before trying to loop
+            if (featuresData && featuresData.audio_features) {
+                featuresData.audio_features.forEach(feature => {
+                    if(feature) audioFeatures[feature.id] = feature;
+                });
+            }
         }
         
         setStatus('Filtering tracks...');
         let filteredTracks = allTracks.filter(item => {
-             if(!item.track) return false;
              const track = item.track;
+             if(!track) return false;
              const features = audioFeatures[track.id];
              if(!features) return false;
 
@@ -910,7 +916,7 @@ function PlaylistCreator() {
              if(isBpmEnabled && (features.tempo < (bpm - 5) || features.tempo > (bpm + 5))) {
                  return false;
              }
-             // Genre filtering is complex and deferred.
+             // Genre filtering is complex and deferred for performance.
              return true;
         });
 
@@ -919,7 +925,7 @@ function PlaylistCreator() {
         if (filteredUris.length === 0) {
             setError('No tracks in your library matched the selected criteria.');
             setStatus('');
-            setIsLoading(false);
+            setIsCustomLoading(false);
             return;
         }
 
@@ -942,7 +948,7 @@ function PlaylistCreator() {
         setStatus('Custom playlist created successfully!');
         setPlaylistsVersion(v => v + 1);
         resetCustomForm();
-        setIsLoading(false);
+        setIsCustomLoading(false);
     };
 
 
@@ -957,10 +963,10 @@ function PlaylistCreator() {
                 </p>
                 <button 
                     onClick={handleCreateWQXRPlaylist} 
-                    disabled={isLoading}
+                    disabled={isWqxrLoading || isCustomLoading}
                     className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
                 >
-                    {isLoading ? 'Creating...' : "Create Yesterday's Playlist"}
+                    {isWqxrLoading ? 'Creating...' : "Create Yesterday's Playlist"}
                 </button>
             </div>
 
@@ -992,10 +998,10 @@ function PlaylistCreator() {
                 </div>
                  <button 
                     onClick={handleCreateCustomPlaylist} 
-                    disabled={isLoading}
+                    disabled={isWqxrLoading || isCustomLoading}
                     className="mt-6 bg-green-600 hover:bg-green-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
                 >
-                    {isLoading ? 'Creating...' : "Create Custom Playlist"}
+                    {isCustomLoading ? 'Creating...' : "Create Custom Playlist"}
                 </button>
             </div>
              {error && <p className="mt-4 text-red-500">{error}</p>}
@@ -1010,7 +1016,6 @@ function PlaylistCreator() {
         </div>
     );
 }
-
 
 
 
