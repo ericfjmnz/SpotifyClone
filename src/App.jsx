@@ -276,7 +276,6 @@ export default function App() {
         }
     }, [token, sdkLoaded]);
 
-    // **FIX**: Effect for updating the song position while playing
     useEffect(() => {
         let interval;
         if (!isPaused) {
@@ -409,6 +408,37 @@ function RightSidebar() {
     );
 }
 
+function VolumeControl() {
+    const { player } = useContext(AppContext);
+    const [volume, setVolume] = useState(50); // Initial volume state
+
+    const handleVolumeChange = (e) => {
+        const newVolume = e.target.value;
+        setVolume(newVolume);
+        if (player) {
+            player.setVolume(newVolume / 100);
+        }
+    };
+
+    return (
+        <div className="flex items-center gap-2">
+            <svg className="w-5 h-5 text-gray-400" fill="currentColor" viewBox="0 0 16 16">
+              <path d="M11.536 14.01A8.473 8.473 0 0 0 14.026 8a8.473 8.473 0 0 0-2.49-6.01l-.708.707A7.476 7.476 0 0 1 13.025 8c0 2.071-.84 3.946-2.197 5.303l.708.707z"/>
+              <path d="M10.121 12.596A6.48 6.48 0 0 0 12.025 8a6.48 6.48 0 0 0-1.904-4.596l-.707.707A5.483 5.483 0 0 1 11.025 8a5.483 5.483 0 0 1-1.61 3.89l.706.706z"/>
+              <path d="M8.707 11.182A4.486 4.486 0 0 0 10.025 8a4.486 4.486 0 0 0-1.318-3.182L8 5.525A3.489 3.489 0 0 1 9.025 8 3.49 3.49 0 0 1 8 10.475l.707.707zM6.717 3.55A.5.5 0 0 1 7 4v8a.5.5 0 0 1-.812.39L3.825 10.5H1.5A.5.5 0 0 1 1 10V6a.5.5 0 0 1 .5-.5h2.325l2.393-1.85a.5.5 0 0 1 .5-.099z"/>
+            </svg>
+            <input
+                type="range"
+                min="0"
+                max="100"
+                value={volume}
+                onChange={handleVolumeChange}
+                className="w-24 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+            />
+        </div>
+    );
+}
+
 function PlayerBar() {
     const { player, currentTrack, isPaused, isPlayerReady, position } = useContext(AppContext);
     const progressBarRef = useRef(null);
@@ -472,8 +502,8 @@ function PlayerBar() {
                     <span>{formatDuration(currentTrack.duration_ms)}</span>
                 </div>
             </div>
-            <div className="w-1/4 flex justify-end items-center gap-2">
-                <p className="text-xs">Volume</p>
+            <div className="w-1/4 flex justify-end items-center gap-4">
+                <VolumeControl />
             </div>
         </footer>
     );
