@@ -805,15 +805,13 @@ function PlaylistCreator() {
         setCreatedPlaylist(null);
         setStatus('Starting WQXR playlist creation...');
 
-        // **NOTE**: This function is now using the proxy server logic you selected.
-        // Make sure your proxy server is running on localhost:3001
         try {
             const { year, month, day } = getYesterdayDateParts();
     
             const proxyResponse = await fetch(`http://localhost:3001/wqxr-playlist?year=${year}&month=${month}&day=${day}`);
             
             if (!proxyResponse.ok) {
-                throw new Error('Failed to fetch data from proxy server.');
+                throw new Error('Failed to fetch data from proxy server. Make sure it is running.');
             }
     
             const data = await proxyResponse.json();
@@ -924,7 +922,7 @@ function PlaylistCreator() {
                     }
                 }
             };
-            const apiKey = "";
+            const apiKey = ""; // IMPORTANT: Add your Gemini API Key here
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
             const geminiResponse = await fetch(apiUrl, {
                 method: 'POST',
