@@ -160,7 +160,7 @@ export default function App() {
     const [isPaused, setIsPaused] = useState(true);
     const [position, setPosition] = useState(0);
     const [sdkLoaded, setSdkLoaded] = useState(false);
-    const [libraryVersion, setLibraryVersion] = useState(0); // Renamed for clarity
+    const [libraryVersion, setLibraryVersion] = useState(0);
     const [profile, setProfile] = useState(null);
     const [playlistToEdit, setPlaylistToEdit] = useState(null);
     const [playlistToDelete, setPlaylistToDelete] = useState(null);
