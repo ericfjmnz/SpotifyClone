@@ -791,6 +791,7 @@ function PlaylistCreator() {
     const [availableGenres, setAvailableGenres] = useState([]);
     const [artistGenres, setArtistGenres] = useState(new Map());
     const [isGenreDataLoading, setIsGenreDataLoading] = useState(true);
+    const [aiPrompt, setAiPrompt] = useState("");
 
     const getYesterdayDateParts = () => {
         const yesterday = new Date();
@@ -800,45 +801,6 @@ function PlaylistCreator() {
         const day = String(yesterday.getDate()).padStart(2, '0');
         return { year, month, day };
     };
-
-    useEffect(() => {
-        const fetchAllGenres = async () => {
-            if (!token) return;
-            setIsGenreDataLoading(true);
-            setStatus("Scanning your library for genres...");
-            let allTracks = [];
-            let nextUrl = 'https://api.spotify.com/v1/me/tracks?limit=50';
-            while(nextUrl) {
-                const response = await fetch(nextUrl, { headers: { Authorization: `Bearer ${token}` } });
-                const data = await response.json();
-                allTracks = [...allTracks, ...data.items.filter(item => item.track)];
-                nextUrl = data.next;
-            }
-
-            const artistIds = [...new Set(allTracks.flatMap(item => item.track.artists.map(artist => artist.id)))];
-            const genres = new Set();
-            const artistGenreMap = new Map();
-
-            for (let i = 0; i < artistIds.length; i += 50) {
-                const batch = artistIds.slice(i, i + 50);
-                const artistsResponse = await fetch(`https://api.spotify.com/v1/artists?ids=${batch.join(',')}`, { headers: { Authorization: `Bearer ${token}` } });
-                const artistsData = await artistsResponse.json();
-                if (artistsData && artistsData.artists) {
-                    artistsData.artists.forEach(artist => {
-                        if (artist && artist.genres) {
-                            artist.genres.forEach(g => genres.add(g));
-                            artistGenreMap.set(artist.id, artist.genres);
-                        }
-                    });
-                }
-            }
-            setAvailableGenres([...genres].sort());
-            setArtistGenres(artistGenreMap);
-            setStatus("");
-            setIsGenreDataLoading(false);
-        };
-        fetchAllGenres();
-    }, [token]);
 
     const { year: yesterdayYear, month: yesterdayMonth, day: yesterdayDay } = getYesterdayDateParts();
 
@@ -905,107 +867,123 @@ function PlaylistCreator() {
     
     const resetCustomForm = () => {
         setCustomPlaylistName('');
-        setGenre('');
-        setYear('');
-        setBpm(120);
-        setIsGenreEnabled(false);
-        setIsYearEnabled(false);
-        setIsBpmEnabled(false);
+        setAiPrompt('');
     };
 
-    const handleCreateCustomPlaylist = async () => {
+    const handleCreateAiPlaylist = async () => {
         setError('');
-        if (!isGenreEnabled && !isYearEnabled && !isBpmEnabled) {
-            setError('Please enable and set at least one filter.');
-            return;
-        }
+        setStatus('');
         if (!customPlaylistName.trim()) {
             setError('Playlist name cannot be empty.');
+            return;
+        }
+        if (!aiPrompt.trim()) {
+            setError('Please describe the kind of playlist you want.');
             return;
         }
         if(!profile) {
             setError('Could not get user profile. Please try again.');
             return;
         }
+
         setIsCustomLoading(true);
         setCreatedPlaylist(null);
-        setStatus('Scanning your library... This may take a moment.');
+        setStatus('Asking AI for song ideas... This may take a moment.');
 
-        let allTracks = [];
-        let nextUrl = 'https://api.spotify.com/v1/me/tracks?limit=50';
-        while(nextUrl) {
-            const response = await fetch(nextUrl, { headers: { Authorization: `Bearer ${token}` } });
-            const data = await response.json();
-            const validItems = data.items.filter(item => item.track);
-            allTracks = [...allTracks, ...validItems];
-            nextUrl = data.next;
-        }
-        
-        setStatus(`Found ${allTracks.length} tracks. Fetching audio features...`);
-
-        const trackIds = allTracks.map(item => item.track.id).filter(id => id);
-        let audioFeatures = {};
-        for (let i = 0; i < trackIds.length; i += 100) {
-            const batch = trackIds.slice(i, i + 100);
-            const featuresResponse = await fetch(`https://api.spotify.com/v1/audio-features?ids=${batch.join(',')}`, {
-                 headers: { Authorization: `Bearer ${token}` }
+        try {
+            // **FIX**: Gemini API Integration
+            const geminiPrompt = `Based on the following theme: "${aiPrompt}", generate a list of 15 suitable songs. Include a mix of popular and less common tracks if possible.`;
+            let chatHistory = [{ role: "user", parts: [{ text: geminiPrompt }] }];
+            const payload = {
+                contents: chatHistory,
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: "OBJECT",
+                        properties: {
+                            "songs": {
+                                type: "ARRAY",
+                                items: {
+                                    type: "OBJECT",
+                                    properties: {
+                                        "track": { "type": "STRING" },
+                                        "artist": { "type": "STRING" }
+                                    },
+                                    required: ["track", "artist"]
+                                }
+                            }
+                        },
+                         required: ["songs"]
+                    }
+                }
+            };
+            const apiKey = "";
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+            const geminiResponse = await fetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
             });
-            const featuresData = await featuresResponse.json();
-            if (featuresData && featuresData.audio_features) {
-                featuresData.audio_features.forEach(feature => {
-                    if(feature) audioFeatures[feature.id] = feature;
-                });
+            
+            if(!geminiResponse.ok) throw new Error("AI request failed.");
+
+            const result = await geminiResponse.json();
+            const songsText = result.candidates[0].content.parts[0].text;
+            const aiSuggestions = JSON.parse(songsText).songs;
+
+            if (!aiSuggestions || aiSuggestions.length === 0) {
+                 setError('The AI could not suggest any songs for this theme. Please try a different prompt.');
+                 setIsCustomLoading(false);
+                 return;
             }
-        }
-        
-        setStatus('Filtering tracks...');
-        let filteredTracks = allTracks.filter(item => {
-             const track = item.track;
-             if(!track) return false;
-             
-             if(isYearEnabled) {
-                 if (!track.album.release_date || track.album.release_date.substring(0, 4) !== year) return false;
-             }
-             if (isBpmEnabled) {
-                const features = audioFeatures[track.id];
-                if (!features || features.tempo < (bpm - 5) || features.tempo > (bpm + 5)) return false;
-             }
-             if (isGenreEnabled && genre.trim() !== '') {
-                const trackGenres = track.artists.flatMap(artist => artistGenres.get(artist.id) || []);
-                if(!trackGenres.some(g => g.includes(genre.toLowerCase()))) return false;
-             }
-             return true;
-        });
 
-        const filteredUris = filteredTracks.map(item => item.track.uri);
-        
-        if (filteredUris.length === 0) {
-            setError('No tracks in your library matched the selected criteria.');
-            setStatus('');
+            setStatus('Searching for suggested songs on Spotify...');
+            const trackUris = [];
+            for (const song of aiSuggestions) {
+                 const query = encodeURIComponent(`track:${song.track} artist:${song.artist}`);
+                 const searchResponse = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, {
+                    headers: { Authorization: `Bearer ${token}` }
+                 });
+                 const searchData = await searchResponse.json();
+                 if (searchData.tracks.items.length > 0) {
+                     trackUris.push(searchData.tracks.items[0].uri);
+                 }
+            }
+
+            if (trackUris.length === 0) {
+                setError('Could not find any of the AI-suggested songs on Spotify.');
+                setStatus('');
+                setIsCustomLoading(false);
+                return;
+            }
+
+            setStatus(`Creating playlist "${customPlaylistName}"...`);
+            const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ name: customPlaylistName, description: `AI-generated playlist based on the prompt: "${aiPrompt}"`, public: false })
+            });
+            const newPlaylist = await playlistResponse.json();
+
+            setStatus(`Adding ${trackUris.length} songs...`);
+            await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ uris: trackUris })
+            });
+
+            setCreatedPlaylist(newPlaylist);
+            setStatus('AI-powered playlist created successfully!');
+            setLibraryVersion(v => v + 1);
+            resetCustomForm();
             setIsCustomLoading(false);
-            return;
+
+        } catch (e) {
+            setError('An error occurred while creating the custom playlist. Please check the console for details.');
+            console.error(e);
+            setIsCustomLoading(false);
         }
 
-        setStatus(`Creating playlist "${customPlaylistName}"...`);
-        const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-            body: JSON.stringify({ name: customPlaylistName, public: false })
-        });
-        const newPlaylist = await playlistResponse.json();
-
-        setStatus(`Adding ${filteredUris.length} songs...`);
-        await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-            body: JSON.stringify({ uris: filteredUris })
-        });
-
-        setCreatedPlaylist(newPlaylist);
-        setStatus('Custom playlist created successfully!');
-        setLibraryVersion(v => v + 1);
-        resetCustomForm();
-        setIsCustomLoading(false);
     };
 
 
@@ -1028,52 +1006,26 @@ function PlaylistCreator() {
             </div>
 
             <div className="bg-gray-800 p-6 rounded-lg">
-                <h2 className="text-xl font-semibold mb-2">Custom Playlist from Your Library</h2>
+                <h2 className="text-xl font-semibold mb-2">AI-Powered Playlist Creator</h2>
                  <p className="text-gray-400 mb-4">
-                    Create a new playlist from your saved songs based on a specific genre, year, or BPM.
+                    Describe the kind of playlist you want, and let AI build it for you.
                 </p>
                 <div className="space-y-4">
                      <div>
                         <label className="block mb-1 text-sm font-medium text-gray-300">Playlist Name</label>
                         <input type="text" value={customPlaylistName} onChange={e => setCustomPlaylistName(e.target.value)} placeholder="My Awesome Mix" className="w-full p-2 bg-gray-700 rounded-md border-gray-600" />
                     </div>
-                    <div className="flex items-center gap-4">
-                        <input type="checkbox" id="genre-toggle" checked={isGenreEnabled} onChange={() => setIsGenreEnabled(!isGenreEnabled)} className="h-4 w-4 rounded text-green-500 focus:ring-green-500 border-gray-500"/>
-                        <label htmlFor="genre-toggle" className="flex-1 text-sm font-medium text-gray-300">Genre</label>
-                        {isGenreDataLoading ? (
-                            <p className="text-gray-400">Loading genres...</p>
-                        ) : (
-                             <input
-                                list="genres"
-                                value={genre}
-                                onChange={e => setGenre(e.target.value)}
-                                placeholder="e.g., rock, electronic"
-                                className="w-full p-2 bg-gray-700 rounded-md border-gray-600 disabled:bg-gray-600"
-                                disabled={!isGenreEnabled}
-                            />
-                        )}
-                        <datalist id="genres">
-                             {availableGenres.map(g => <option key={g} value={g} />)}
-                        </datalist>
-
-                    </div>
-                     <div className="flex items-center gap-4">
-                        <input type="checkbox" id="year-toggle" checked={isYearEnabled} onChange={() => setIsYearEnabled(!isYearEnabled)} className="h-4 w-4 rounded text-green-500 focus:ring-green-500 border-gray-500"/>
-                        <label htmlFor="year-toggle" className="flex-1 text-sm font-medium text-gray-300">Year</label>
-                        <input type="number" value={year} onChange={e => setYear(e.target.value)} placeholder="e.g., 1995" className="w-full p-2 bg-gray-700 rounded-md border-gray-600 disabled:bg-gray-600" disabled={!isYearEnabled} />
-                    </div>
-                     <div className="flex items-center gap-4">
-                        <input type="checkbox" id="bpm-toggle" checked={isBpmEnabled} onChange={() => setIsBpmEnabled(!isBpmEnabled)} className="h-4 w-4 rounded text-green-500 focus:ring-green-500 border-gray-500"/>
-                        <label htmlFor="bpm-toggle" className="flex-1 text-sm font-medium text-gray-300">BPM (±5)</label>
-                         <input type="number" value={bpm} onChange={e => setBpm(e.target.value)} placeholder="e.g., 120" className="w-full p-2 bg-gray-700 rounded-md border-gray-600 disabled:bg-gray-600" disabled={!isBpmEnabled}/>
+                     <div>
+                        <label className="block mb-1 text-sm font-medium text-gray-300">Describe your playlist</label>
+                        <textarea value={aiPrompt} onChange={e => setAiPrompt(e.target.value)} placeholder="e.g., an upbeat roadtrip playlist with 90s alternative rock" rows="3" className="w-full p-2 bg-gray-700 rounded-md border-gray-600" />
                     </div>
                 </div>
                  <button 
-                    onClick={handleCreateCustomPlaylist} 
+                    onClick={handleCreateAiPlaylist} 
                     disabled={isWqxrLoading || isCustomLoading}
                     className="mt-6 bg-green-600 hover:bg-green-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
                 >
-                    {isCustomLoading ? 'Creating...' : "Create Custom Playlist"}
+                    {isCustomLoading ? 'Creating...' : "Create AI Playlist"}
                 </button>
             </div>
              {error && <p className="mt-4 text-red-500">{error}</p>}
