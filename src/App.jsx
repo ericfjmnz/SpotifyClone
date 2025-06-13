@@ -154,6 +154,7 @@ export default function App() {
     const [selectedPlaylistId, setSelectedPlaylistId] = useState(null);
     const [player, setPlayer] = useState(null);
     const [isPlayerReady, setIsPlayerReady] = useState(false);
+    const [deviceId, setDeviceId] = useState(null); // **FIX**: State to hold the device ID
     const [currentTrack, setCurrentTrack] = useState(null);
     const [isPaused, setIsPaused] = useState(true);
     const [sdkLoaded, setSdkLoaded] = useState(false);
@@ -250,8 +251,12 @@ export default function App() {
 
             playerInstance.addListener('ready', ({ device_id }) => {
                 setIsPlayerReady(true);
+                setDeviceId(device_id); // **FIX**: Save the device ID
             });
-            playerInstance.addListener('not_ready', ({ device_id }) => {});
+            playerInstance.addListener('not_ready', ({ device_id }) => {
+                 setIsPlayerReady(false);
+                 setDeviceId(null);
+            });
             
             playerInstance.addListener('player_state_changed', ( state => {
                 if (!state) {
@@ -278,7 +283,7 @@ export default function App() {
     }
 
     return (
-        <AppContext.Provider value={{ token, view, setView, selectedPlaylistId, setSelectedPlaylistId, player, isPlayerReady, currentTrack, isPaused, logout }}>
+        <AppContext.Provider value={{ token, view, setView, selectedPlaylistId, setSelectedPlaylistId, player, isPlayerReady, currentTrack, isPaused, logout, deviceId }}>
             <div className="h-screen w-full flex flex-col bg-black text-white font-sans">
                 <div className="flex flex-1 overflow-y-hidden">
                     <Sidebar />
@@ -394,7 +399,7 @@ function PlayerBar() {
 
     if (!player) return <footer className="h-24 bg-black border-t border-gray-800 flex items-center justify-center"><p className="text-gray-400">Connecting to Spotify...</p></footer>;
     
-    if (!isPlayerReady) return <footer className="h-24 bg-black border-t border-gray-800 flex items-center justify-center"><p className="text-gray-400">Player not ready. Open a Spotify app on your computer or phone.</p></footer>;
+    if (!isPlayerReady) return <footer className="h-24 bg-black border-t border-gray-800 flex items-center justify-center text-center p-2"><p className="text-gray-400">Player not ready. Please open a Spotify app on your computer or phone to start listening.</p></footer>;
     
     if (!currentTrack) return <footer className="h-24 bg-black border-t border-gray-800 flex items-center justify-center"><p className="text-gray-400">Select a song to play.</p></footer>;
 
@@ -585,10 +590,15 @@ function HomePage() {
 
 function PlaylistView({ playlistId }) {
     const { data: playlist, loading } = useSpotifyApi(`/playlists/${playlistId}`);
-    const { token } = useContext(AppContext);
+    const { token, deviceId } = useContext(AppContext); // **FIX**: Get deviceId from context
 
     const playTrack = (trackUri) => {
-        fetch(`https://api.spotify.com/v1/me/player/play`, {
+        // **FIX**: Check for deviceId before attempting to play
+        if (!deviceId) {
+            alert("No active player found. Please open Spotify on a device.");
+            return;
+        }
+        fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',
