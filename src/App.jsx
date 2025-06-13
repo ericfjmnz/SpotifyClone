@@ -445,8 +445,9 @@ const useSpotifyApi = (url) => {
                 setLoading(true);
                 const response = await fetch(`https://api.spotify.com/v1${url}`, {
                     headers: {
-                        Authorization: `Bearer ${token}`
-                    }
+                        Authorization: `Bearer ${token}`,
+                    },
+                    cache: 'no-cache', // **FIX**: Disable caching to prevent 304 errors
                 });
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
@@ -468,17 +469,18 @@ const useSpotifyApi = (url) => {
 
 // --- View Components ---
 
-function ContentSection({ title, children, error }) {
-     if (error) return <p className="text-red-400">Could not load section: {error.message}</p>;
+function ContentSection({ title, children, error, loading }) {
+    if (loading) return <div className="p-4 text-gray-400">Loading {title}...</div>
+    if (error) return <p className="text-red-400 p-4">Could not load section: {error.message}</p>;
+    if (!children || (Array.isArray(children) && children.length === 0)) return null;
+
     return (
         <section>
             <div className="flex justify-between items-center mb-4">
                 <h2 className="text-2xl font-bold hover:underline cursor-pointer">{title}</h2>
                 <span className="text-sm font-bold text-gray-400 hover:underline cursor-pointer">Show all</span>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
-                {children}
-            </div>
+            {children}
         </section>
     );
 }
@@ -523,8 +525,8 @@ function HomePage() {
         <div className="space-y-12">
             <h1 className="text-3xl font-bold">{getGreeting()}</h1>
             
-            <ContentSection title="Recently Played" error={recentError}>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <ContentSection title="Recently Played" loading={recentLoading} error={recentError}>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {recent?.items.map(({ track }, index) => (
                        <div key={`${track.id}-${index}`} className="bg-white/10 hover:bg-white/20 transition-colors duration-300 rounded-md flex items-center gap-4 group cursor-pointer overflow-hidden">
                            <img src={track.album.images[0]?.url || 'https://placehold.co/80x80/181818/FFFFFF?text=...'} alt={track.name} className="w-20 h-20 flex-shrink-0"/>
@@ -537,27 +539,31 @@ function HomePage() {
                 </div>
             </ContentSection>
             
-            <ContentSection title={featuredPlaylistsData?.message || "Featured Playlists"} error={playlistsError}>
-                {featuredPlaylistsData?.playlists.items.map(playlist => (
-                   <PlaylistCard 
-                        key={playlist.id} 
-                        imageUrl={playlist.images[0]?.url}
-                        title={playlist.name}
-                        subtitle={playlist.description.replace(/<[^>]*>?/gm, '')}
-                    />
-                ))}
+            <ContentSection title={featuredPlaylistsData?.message || "Featured Playlists"} loading={playlistsLoading} error={playlistsError}>
+                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
+                    {featuredPlaylistsData?.playlists.items.map(playlist => (
+                       <PlaylistCard 
+                            key={playlist.id} 
+                            imageUrl={playlist.images[0]?.url}
+                            title={playlist.name}
+                            subtitle={playlist.description.replace(/<[^>]*>?/gm, '')}
+                        />
+                    ))}
+                 </div>
             </ContentSection>
 
-            <ContentSection title="Your Top Artists" error={artistsError}>
-                {topArtists?.items.map(artist => (
-                   <PlaylistCard 
-                        key={artist.id} 
-                        imageUrl={artist.images[0]?.url}
-                        title={artist.name}
-                        subtitle="Artist"
-                        isArtist={true}
-                    />
-                ))}
+            <ContentSection title="Your Top Artists" loading={artistsLoading} error={artistsError}>
+                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
+                    {topArtists?.items.map(artist => (
+                       <PlaylistCard 
+                            key={artist.id} 
+                            imageUrl={artist.images[0]?.url}
+                            title={artist.name}
+                            subtitle="Artist"
+                            isArtist={true}
+                        />
+                    ))}
+                </div>
             </ContentSection>
         </div>
     );
@@ -593,21 +599,24 @@ function PlaylistView({ playlistId }) {
             </header>
             
             <div>
-                {playlist.tracks.items.map(({ track }, index) => (
-                    <div key={track.id + index} className="grid grid-cols-[auto,1fr,auto] items-center gap-4 p-2 rounded-md hover:bg-white/10 group">
-                        <div className="text-gray-400 w-8 text-center">{index + 1}</div>
-                        <div className="flex items-center gap-4">
-                            <img src={track.album.images[2]?.url} alt="" className="w-10 h-10"/>
-                            <div>
-                                <p className="font-semibold text-white">{track.name}</p>
-                                <p className="text-sm text-gray-400">{track.artists.map(a => a.name).join(', ')}</p>
+                {playlist.tracks.items.map(({ track }, index) => {
+                    if(!track) return null; // Add guard for null tracks
+                    return (
+                        <div key={track.id + index} className="grid grid-cols-[auto,1fr,auto] items-center gap-4 p-2 rounded-md hover:bg-white/10 group">
+                            <div className="text-gray-400 w-8 text-center">{index + 1}</div>
+                            <div className="flex items-center gap-4">
+                                <img src={track.album.images[2]?.url} alt="" className="w-10 h-10"/>
+                                <div>
+                                    <p className="font-semibold text-white">{track.name}</p>
+                                    <p className="text-sm text-gray-400">{track.artists.map(a => a.name).join(', ')}</p>
+                                </div>
                             </div>
+                            <button onClick={() => playTrack(track.uri)} className="text-white opacity-0 group-hover:opacity-100">
+                                 <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                            </button>
                         </div>
-                        <button onClick={() => playTrack(track.uri)} className="text-white opacity-0 group-hover:opacity-100">
-                             <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                        </button>
-                    </div>
-                ))}
+                    );
+                })}
             </div>
         </div>
     );
@@ -645,6 +654,7 @@ function PlaylistCurator() {
         </div>
     );
 }
+
 
 
 
