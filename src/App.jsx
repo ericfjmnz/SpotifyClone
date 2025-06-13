@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, createContext, useContext } from 'react';
+import React, { useState, useEffect, useCallback, createContext, useContext, useRef } from 'react';
 
 // --- Spotify API Configuration ---
 const REDIRECT_URI = window.location.origin; 
@@ -157,6 +157,7 @@ export default function App() {
     const [deviceId, setDeviceId] = useState(null);
     const [currentTrack, setCurrentTrack] = useState(null);
     const [isPaused, setIsPaused] = useState(true);
+    const [position, setPosition] = useState(0);
     const [sdkLoaded, setSdkLoaded] = useState(false);
 
     const logout = useCallback(() => {
@@ -264,6 +265,7 @@ export default function App() {
                 }
                 setCurrentTrack(state.track_window.current_track);
                 setIsPaused(state.paused);
+                setPosition(state.position);
             }));
 
             playerInstance.connect();
@@ -273,6 +275,19 @@ export default function App() {
             };
         }
     }, [token, sdkLoaded]);
+
+    // **FIX**: Effect for updating the song position while playing
+    useEffect(() => {
+        let interval;
+        if (!isPaused) {
+            interval = setInterval(() => {
+                setPosition(prevPosition => prevPosition + 1000);
+            }, 1000);
+        } else if (isPaused) {
+            clearInterval(interval);
+        }
+        return () => clearInterval(interval);
+    }, [isPaused]);
     
     if (isLoading && !token) {
         return <div className="h-screen w-full flex items-center justify-center bg-black text-white"><p>Loading...</p></div>;
@@ -283,7 +298,7 @@ export default function App() {
     }
 
     return (
-        <AppContext.Provider value={{ token, view, setView, selectedPlaylistId, setSelectedPlaylistId, player, isPlayerReady, currentTrack, isPaused, logout, deviceId }}>
+        <AppContext.Provider value={{ token, view, setView, selectedPlaylistId, setSelectedPlaylistId, player, isPlayerReady, currentTrack, isPaused, logout, deviceId, position }}>
             <div className="h-screen w-full flex flex-col bg-black text-white font-sans">
                 <div className="flex flex-1 overflow-y-hidden">
                     <Sidebar />
@@ -395,7 +410,15 @@ function RightSidebar() {
 }
 
 function PlayerBar() {
-    const { player, currentTrack, isPaused, isPlayerReady } = useContext(AppContext);
+    const { player, currentTrack, isPaused, isPlayerReady, position } = useContext(AppContext);
+    const progressBarRef = useRef(null);
+
+    const formatDuration = (ms) => {
+        const totalSeconds = Math.floor(ms / 1000);
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+    };
 
     if (!player) return <footer className="h-24 bg-black border-t border-gray-800 flex items-center justify-center"><p className="text-gray-400">Connecting to Spotify...</p></footer>;
     
@@ -405,6 +428,18 @@ function PlayerBar() {
 
     const togglePlay = () => {
         player.togglePlay();
+    };
+    
+    const progress = currentTrack ? (position / currentTrack.duration_ms) * 100 : 0;
+
+    const handleSeek = (e) => {
+        if (progressBarRef.current && currentTrack) {
+            const rect = progressBarRef.current.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            const percentage = clickX / rect.width;
+            const newPosition = percentage * currentTrack.duration_ms;
+            player.seek(newPosition);
+        }
     };
 
     return (
@@ -427,9 +462,15 @@ function PlayerBar() {
                     </button>
                     <button className="text-gray-400 hover:text-white">»</button>
                  </div>
-                 <div className="w-full h-1 bg-gray-700 rounded-full mt-1">
-                    <div className="w-1/2 h-full bg-white rounded-full"></div>
-                 </div>
+                 <div className="w-full flex items-center gap-2 text-xs text-gray-400">
+                    <span>{formatDuration(position)}</span>
+                    <div ref={progressBarRef} onClick={handleSeek} className="w-full h-1 bg-gray-700 rounded-full cursor-pointer group">
+                        <div style={{ width: `${progress}%` }} className="h-full bg-white rounded-full group-hover:bg-green-500 relative">
+                           <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full opacity-0 group-hover:opacity-100"></div>
+                        </div>
+                    </div>
+                    <span>{formatDuration(currentTrack.duration_ms)}</span>
+                </div>
             </div>
             <div className="w-1/4 flex justify-end items-center gap-2">
                 <p className="text-xs">Volume</p>
@@ -608,8 +649,9 @@ function PlaylistView({ playlistId }) {
     };
 
     const formatDuration = (ms) => {
-        const minutes = Math.floor(ms / 60000);
-        const seconds = ((ms % 60000) / 1000).toFixed(0);
+        const totalSeconds = Math.floor(ms / 1000);
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
         return `${minutes}:${(seconds < 10 ? '0' : '')}${seconds}`;
     };
 
@@ -628,40 +670,44 @@ function PlaylistView({ playlistId }) {
             </header>
             
             <div>
-                {playlist.tracks.items.map(({ track }, index) => {
-                    if(!track) return null;
-                    const isPlaying = currentTrack?.uri === track.uri && !isPaused;
+                 {playlist.tracks && playlist.tracks.items && playlist.tracks.items.length > 0 ? (
+                    playlist.tracks.items.map(({ track }, index) => {
+                        if(!track) return null;
+                        const isPlaying = currentTrack?.uri === track.uri && !isPaused;
 
-                    return (
-                        <div 
-                            key={track.id + index} 
-                            className="grid grid-cols-[auto,1fr,auto] items-center gap-4 p-2 rounded-md hover:bg-white/10 group"
-                            onDoubleClick={() => playTrack(track.uri)}
-                        >
-                            <div className="text-gray-400 w-8 text-center flex items-center justify-center">
-                               { isPlaying ?
-                                    ( <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-green-500 animate-pulse"><path d="M2.69231 6.30769V9.69231H0V6.30769H2.69231ZM6.76923 12.4615V3.53846H4.07692V12.4615H6.76923ZM10.8462 16V0H8.15385V16H10.8462ZM14.9231 12.4615V3.53846H12.2308V12.4615H14.9231Z" fill="currentColor"/></svg> ) :
-                                    ( <>
-                                        <span className="group-hover:hidden">{index + 1}</span>
-                                        <button onClick={() => playTrack(track.uri)} className="text-white hidden group-hover:block">
-                                            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                                        </button>
-                                    </> )
-                                }
-                            </div>
-                            <div className="flex items-center gap-4">
-                                <img src={track.album.images[2]?.url || 'https://placehold.co/40x40/181818/FFFFFF?text=...'} alt={track.name} className="w-10 h-10"/>
-                                <div>
-                                    <p className={`font-semibold ${isPlaying ? 'text-green-500' : 'text-white'}`}>{track.name}</p>
-                                    <p className="text-sm text-gray-400">{track.artists.map(a => a.name).join(', ')}</p>
+                        return (
+                            <div 
+                                key={track.id + index} 
+                                className="grid grid-cols-[auto,1fr,auto] items-center gap-4 p-2 rounded-md hover:bg-white/10 group"
+                                onDoubleClick={() => playTrack(track.uri)}
+                            >
+                                <div className="text-gray-400 w-8 text-center flex items-center justify-center">
+                                   { isPlaying ?
+                                        ( <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-green-500 animate-pulse"><path d="M2.69231 6.30769V9.69231H0V6.30769H2.69231ZM6.76923 12.4615V3.53846H4.07692V12.4615H6.76923ZM10.8462 16V0H8.15385V16H10.8462ZM14.9231 12.4615V3.53846H12.2308V12.4615H14.9231Z" fill="currentColor"/></svg> ) :
+                                        ( <>
+                                            <span className="group-hover:hidden">{index + 1}</span>
+                                            <button onClick={() => playTrack(track.uri)} className="text-white hidden group-hover:block">
+                                                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                                            </button>
+                                        </> )
+                                    }
+                                </div>
+                                <div className="flex items-center gap-4">
+                                    <img src={track.album.images[2]?.url || 'https://placehold.co/40x40/181818/FFFFFF?text=...'} alt={track.name} className="w-10 h-10"/>
+                                    <div>
+                                        <p className={`font-semibold ${isPlaying ? 'text-green-500' : 'text-white'}`}>{track.name}</p>
+                                        <p className="text-sm text-gray-400">{track.artists.map(a => a.name).join(', ')}</p>
+                                    </div>
+                                </div>
+                                <div className="text-sm text-gray-400">
+                                    {formatDuration(track.duration_ms)}
                                 </div>
                             </div>
-                            <div className="text-sm text-gray-400">
-                                {formatDuration(track.duration_ms)}
-                            </div>
-                        </div>
-                    );
-                })}
+                        );
+                    })
+                ) : (
+                    <p className="text-gray-400 p-4">This playlist is empty.</p>
+                )}
             </div>
         </div>
     );
