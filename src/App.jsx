@@ -340,6 +340,7 @@ function Sidebar() {
                  <ul className="space-y-2">
                     <NavItem label="Home" targetView="home" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="currentColor" viewBox="0 0 16 16"><path d="M8.354 1.146a.5.5 0 0 0-.708 0l-6 6A.5.5 0 0 0 1.5 7.5v7a.5.5 0 0 0 .5.5h4.5a.5.5 0 0 0 .5-.5v-4h2v4a.5.5 0 0 0 .5.5H14a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.146-.354L8.354 1.146zM2.5 14V7.707l5.5-5.5 5.5 5.5V14H10v-4a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 0-.5.5v4H2.5z"/></svg>} />
                     <NavItem label="Search" targetView="search" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="currentColor" viewBox="0 0 16 16"><path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/></svg>} />
+                     <NavItem label="Playlist Creator" targetView="creator" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="currentColor" viewBox="0 0 16 16"><path d="M6 13c0 1.105-1.12 2-2.5 2S1 14.105 1 13c0-1.104 1.12-2 2.5-2s2.5.896 2.5 2zM1 7v2h6V7H1zm6-2v2H1V5h6zm1-2v2H1V3h6zm1-2v2H1V1h6zm1 10.117V15h8v-1.883l-4-3.117-4 3.117zM15.5 9a.5.5 0 0 1-.5.5h-8a.5.5 0 0 1-.5-.5V3.334l4-3.117 4 3.117V9z"/></svg>} />
                 </ul>
             </div>
             <div className="bg-[#121212] rounded-lg p-2 mt-2 flex-1 overflow-y-auto">
@@ -371,6 +372,7 @@ function MainContent() {
             <div className="p-6 md:p-8">
                 {view === 'home' && <HomePage />}
                 {view === 'playlist' && <PlaylistView playlistId={selectedPlaylistId} />}
+                {view === 'creator' && <PlaylistCreator />}
                 {view === 'search' && <div className="text-center"><h1 className="text-3xl font-bold">Search</h1><p className="text-gray-400">Search functionality coming soon!</p></div>}
             </div>
         </main>
@@ -743,38 +745,118 @@ function PlaylistView({ playlistId }) {
     );
 }
 
-function PlaylistCurator() {
+function PlaylistCreator() {
+    const { token } = useContext(AppContext);
+    const { data: profile } = useSpotifyApi('/me');
+    const [status, setStatus] = useState('');
+    const [createdPlaylist, setCreatedPlaylist] = useState(null);
+    const [isLoading, setIsLoading] = useState(false);
+
+    const getYesterdayDateParts = () => {
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const year = yesterday.getFullYear();
+        const month = yesterday.toLocaleString('default', { month: 'short' }).toLowerCase();
+        const day = String(yesterday.getDate()).padStart(2, '0');
+        return { year, month, day };
+    };
+
+    const { year, month, day } = getYesterdayDateParts();
+
+    const handleCreatePlaylist = async () => {
+        setIsLoading(true);
+        setCreatedPlaylist(null);
+        setStatus('Starting process...');
+
+        // NOTE: This part is simulated. A real app would need a backend proxy
+        // to fetch from the WQXR URL due to browser CORS restrictions.
+        setStatus('Simulating fetch from WQXR...');
+        const simulatedTracks = [
+            { title: 'Symphony No. 5', composer: 'Beethoven' },
+            { title: 'The Four Seasons', composer: 'Vivaldi' },
+            { title: 'Clair de Lune', composer: 'Debussy' },
+            { title: 'Eine kleine Nachtmusik', composer: 'Mozart' },
+            { title: 'Nocturne in E-flat major, Op. 9 No. 2', composer: 'Chopin'}
+        ];
+        
+        setStatus('Searching for tracks on Spotify...');
+        const trackUris = [];
+        for (const track of simulatedTracks) {
+            const query = encodeURIComponent(`track:${track.title} artist:${track.composer}`);
+            const response = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            const data = await response.json();
+            if (data.tracks.items.length > 0) {
+                trackUris.push(data.tracks.items[0].uri);
+            }
+        }
+
+        if (trackUris.length === 0) {
+            setStatus('Could not find any of the tracks on Spotify.');
+            setIsLoading(false);
+            return;
+        }
+
+        setStatus('Creating new playlist...');
+        const playlistName = `WQXR Daily - ${year}-${month}-${day}`;
+        const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`
+            },
+            body: JSON.stringify({
+                name: playlistName,
+                description: `A playlist of songs from WQXR on ${year}-${month}-${day}. Created by React Spotify Client.`,
+                public: false
+            })
+        });
+        const newPlaylist = await playlistResponse.json();
+
+        setStatus('Adding tracks to the new playlist...');
+        await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
+             method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`
+            },
+            body: JSON.stringify({ uris: trackUris })
+        });
+        
+        setCreatedPlaylist(newPlaylist);
+        setStatus('Playlist created successfully!');
+        setIsLoading(false);
+    };
+
     return (
         <div>
-            <h1 className="text-3xl font-bold mb-4">Playlist Curator</h1>
-            <p className="text-gray-400 mb-6">This tool will help you build playlists based on specific criteria like BPM, genre, and release year.</p>
+            <h1 className="text-3xl font-bold mb-4">Playlist Creator</h1>
             <div className="bg-gray-800 p-6 rounded-lg">
-                <h2 className="text-xl font-semibold mb-4">Filters</h2>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                        <label className="block mb-1 text-sm font-medium text-gray-300">Genre</label>
-                        <input type="text" placeholder="e.g., electronic, rock" className="w-full p-2 bg-gray-700 rounded-md border-gray-600" />
+                <h2 className="text-xl font-semibold mb-2">WQXR Daily Playlist</h2>
+                <p className="text-gray-400 mb-4">
+                    Create a new playlist based on the music played yesterday ({day}-{month}-{year}) on WQXR.
+                </p>
+                <button 
+                    onClick={handleCreatePlaylist} 
+                    disabled={isLoading}
+                    className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
+                >
+                    {isLoading ? 'Creating...' : "Create Yesterday's Playlist"}
+                </button>
+                {status && <p className="mt-4 text-gray-300">{status}</p>}
+                {createdPlaylist && (
+                    <div className="mt-4">
+                        <a href={createdPlaylist.external_urls.spotify} target="_blank" rel="noopener noreferrer" className="text-green-500 font-semibold hover:underline">
+                            Open your new playlist: "{createdPlaylist.name}"
+                        </a>
                     </div>
-                     <div>
-                        <label className="block mb-1 text-sm font-medium text-gray-300">BPM (Beats Per Minute)</label>
-                        <input type="range" min="0" max="220" className="w-full" />
-                    </div>
-                     <div>
-                        <label className="block mb-1 text-sm font-medium text-gray-300">Year</label>
-                        <input type="number" placeholder="e.g., 1995" className="w-full p-2 bg-gray-700 rounded-md border-gray-600" />
-                    </div>
-                </div>
-                <div className="mt-6 text-center">
-                    <button className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-full">Find Songs & Create Playlist</button>
-                </div>
-            </div>
-            <div className="mt-8">
-                 <h3 className="text-lg font-semibold mb-4">Results will appear here...</h3>
-                 {/* Placeholder for results */}
+                )}
             </div>
         </div>
     );
 }
+
 
 
 
