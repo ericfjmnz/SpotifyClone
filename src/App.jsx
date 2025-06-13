@@ -15,7 +15,7 @@ const SCOPES = [
     "user-read-recently-played",
     "playlist-read-private",
     "playlist-read-collaborative",
-    "user-read-currently-playing", // **FIX**: Added scope for premium check
+    "user-read-currently-playing",
     // Scopes required for Web Playback SDK
     "streaming",
     "user-read-playback-state",
@@ -764,6 +764,9 @@ function PlaylistCreator() {
     const [year, setYear] = useState('');
     const [isBpmEnabled, setIsBpmEnabled] = useState(false);
     const [bpm, setBpm] = useState(120);
+    const [availableGenres, setAvailableGenres] = useState([]);
+    const [artistGenres, setArtistGenres] = useState(new Map());
+    const [isGenreDataLoading, setIsGenreDataLoading] = useState(true);
 
     const getYesterdayDateParts = () => {
         const yesterday = new Date();
@@ -773,6 +776,43 @@ function PlaylistCreator() {
         const day = String(yesterday.getDate()).padStart(2, '0');
         return { year, month, day };
     };
+
+    useEffect(() => {
+        const fetchAllGenres = async () => {
+            if (!token) return;
+            setIsGenreDataLoading(true);
+            setStatus("Scanning your library for genres...");
+            let allTracks = [];
+            let nextUrl = 'https://api.spotify.com/v1/me/tracks?limit=50';
+            while(nextUrl) {
+                const response = await fetch(nextUrl, { headers: { Authorization: `Bearer ${token}` } });
+                const data = await response.json();
+                allTracks = [...allTracks, ...data.items.filter(item => item.track)];
+                nextUrl = data.next;
+            }
+
+            const artistIds = [...new Set(allTracks.flatMap(item => item.track.artists.map(artist => artist.id)))];
+            const genres = new Set();
+            const artistGenreMap = new Map();
+
+            for (let i = 0; i < artistIds.length; i += 50) {
+                const batch = artistIds.slice(i, i + 50);
+                const artistsResponse = await fetch(`https://api.spotify.com/v1/artists?ids=${batch.join(',')}`, { headers: { Authorization: `Bearer ${token}` } });
+                const artistsData = await artistsResponse.json();
+                if (artistsData && artistsData.artists) {
+                    artistsData.artists.forEach(artist => {
+                        artist.genres.forEach(g => genres.add(g));
+                        artistGenreMap.set(artist.id, artist.genres);
+                    });
+                }
+            }
+            setAvailableGenres([...genres].sort());
+            setArtistGenres(artistGenreMap);
+            setStatus("");
+            setIsGenreDataLoading(false);
+        };
+        fetchAllGenres();
+    }, [token]);
 
     const { year: yesterdayYear, month: yesterdayMonth, day: yesterdayDay } = getYesterdayDateParts();
 
@@ -819,25 +859,15 @@ function PlaylistCreator() {
         const playlistName = `WQXR Daily - ${yesterdayYear}-${yesterdayMonth}-${yesterdayDay}`;
         const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${token}`
-            },
-            body: JSON.stringify({
-                name: playlistName,
-                description: `A playlist of songs from WQXR on ${yesterdayYear}-${yesterdayMonth}-${yesterdayDay}. Created by React Spotify Client.`,
-                public: false
-            })
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`},
+            body: JSON.stringify({ name: playlistName, description: `A playlist of songs from WQXR on ${yesterdayYear}-${yesterdayMonth}-${yesterdayDay}.`, public: false })
         });
         const newPlaylist = await playlistResponse.json();
 
         setStatus('Adding tracks to the new WQXR playlist...');
         await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
              method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${token}`
-            },
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
             body: JSON.stringify({ uris: trackUris })
         });
         
@@ -880,14 +910,14 @@ function PlaylistCreator() {
         while(nextUrl) {
             const response = await fetch(nextUrl, { headers: { Authorization: `Bearer ${token}` } });
             const data = await response.json();
-            const validItems = data.items.filter(item => item.track); // Filter out items without a track object
+            const validItems = data.items.filter(item => item.track);
             allTracks = [...allTracks, ...validItems];
             nextUrl = data.next;
         }
         
         setStatus(`Found ${allTracks.length} tracks. Fetching audio features...`);
 
-        const trackIds = allTracks.map(item => item.track.id).filter(id => id); 
+        const trackIds = allTracks.map(item => item.track.id).filter(id => id);
         let audioFeatures = {};
         for (let i = 0; i < trackIds.length; i += 100) {
             const batch = trackIds.slice(i, i + 100);
@@ -895,7 +925,6 @@ function PlaylistCreator() {
                  headers: { Authorization: `Bearer ${token}` }
             });
             const featuresData = await featuresResponse.json();
-            // **FIX**: Check if audio_features exists before trying to loop
             if (featuresData && featuresData.audio_features) {
                 featuresData.audio_features.forEach(feature => {
                     if(feature) audioFeatures[feature.id] = feature;
@@ -907,16 +936,18 @@ function PlaylistCreator() {
         let filteredTracks = allTracks.filter(item => {
              const track = item.track;
              if(!track) return false;
-             const features = audioFeatures[track.id];
-             if(!features) return false;
-
-             if(isYearEnabled && track.album.release_date.substring(0, 4) !== year) {
-                 return false;
+             
+             if(isYearEnabled) {
+                 if (!track.album.release_date || track.album.release_date.substring(0, 4) !== year) return false;
              }
-             if(isBpmEnabled && (features.tempo < (bpm - 5) || features.tempo > (bpm + 5))) {
-                 return false;
+             if (isBpmEnabled) {
+                const features = audioFeatures[track.id];
+                if (!features || features.tempo < (bpm - 5) || features.tempo > (bpm + 5)) return false;
              }
-             // Genre filtering is complex and deferred for performance.
+             if (isGenreEnabled) {
+                const trackGenres = track.artists.flatMap(artist => artistGenres.get(artist.id) || []);
+                if(!trackGenres.includes(genre)) return false;
+             }
              return true;
         });
 
@@ -983,7 +1014,14 @@ function PlaylistCreator() {
                     <div className="flex items-center gap-4">
                         <input type="checkbox" id="genre-toggle" checked={isGenreEnabled} onChange={() => setIsGenreEnabled(!isGenreEnabled)} className="h-4 w-4 rounded text-green-500 focus:ring-green-500 border-gray-500"/>
                         <label htmlFor="genre-toggle" className="flex-1 text-sm font-medium text-gray-300">Genre</label>
-                        <input type="text" value={genre} onChange={e => setGenre(e.target.value)} placeholder="e.g., rock, electronic" className="w-full p-2 bg-gray-700 rounded-md border-gray-600 disabled:bg-gray-600" disabled={!isGenreEnabled} />
+                        {isGenreDataLoading ? (
+                            <p className="text-gray-400">Loading genres...</p>
+                        ) : (
+                            <select value={genre} onChange={e => setGenre(e.target.value)} className="w-full p-2 bg-gray-700 rounded-md border-gray-600 disabled:bg-gray-600" disabled={!isGenreEnabled}>
+                                <option value="">Select a genre</option>
+                                {availableGenres.map(g => <option key={g} value={g}>{g}</option>)}
+                            </select>
+                        )}
                     </div>
                      <div className="flex items-center gap-4">
                         <input type="checkbox" id="year-toggle" checked={isYearEnabled} onChange={() => setIsYearEnabled(!isYearEnabled)} className="h-4 w-4 rounded text-green-500 focus:ring-green-500 border-gray-500"/>
