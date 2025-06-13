@@ -238,7 +238,6 @@ export default function App() {
                 name: 'React Spotify Clone',
                 getOAuthToken: cb => { cb(token); },
                 volume: 0.5,
-                // **FIX**: Add recommended getRobustnessLevel property
                 getRobustnessLevel: () => Promise.resolve('low'),
             });
 
@@ -658,6 +657,7 @@ function PlaylistCurator() {
         </div>
     );
 }
+
 
 
 
