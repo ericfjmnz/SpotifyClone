@@ -339,6 +339,7 @@ function Sidebar() {
     );
     
      const handlePlaylistClick = (playlistId) => {
+        setActiveMenu(null);
         setSelectedPlaylistId(playlistId);
         setView('playlist');
     };
@@ -1087,8 +1088,6 @@ function PlaylistCreator() {
         </div>
     );
 }
-
-
 
 
 
