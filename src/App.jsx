@@ -907,7 +907,7 @@ function PlaylistCreator() {
                     }
                 }
             };
-            const apiKey = "";
+            const apiKey = "AIzaSyAsb7lrYNWBzSIUe5RUCOCMib20FzAX61M";
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
             const geminiResponse = await fetch(apiUrl, {
                 method: 'POST',
@@ -1038,19 +1038,31 @@ function EditPlaylistModal({ playlist, onClose }) {
     const { token, setLibraryVersion } = useContext(AppContext);
     const [name, setName] = useState(playlist.name);
     const [description, setDescription] = useState(playlist.description || "");
+    const [isSaving, setIsSaving] = useState(false);
 
     const handleSave = async (e) => {
         e.preventDefault();
-        await fetch(`https://api.spotify.com/v1/playlists/${playlist.id}`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${token}`
-            },
-            body: JSON.stringify({ name, description })
-        });
-        setLibraryVersion(v => v + 1); // Trigger a refresh
-        onClose();
+        setIsSaving(true);
+        try {
+            const response = await fetch(`https://api.spotify.com/v1/playlists/${playlist.id}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`
+                },
+                body: JSON.stringify({ name, description })
+            });
+             if (!response.ok) {
+                throw new Error('Failed to update playlist.');
+            }
+            setLibraryVersion(v => v + 1); 
+            onClose();
+        } catch (error) {
+            console.error("Error updating playlist:", error);
+            alert("Could not update playlist.");
+        } finally {
+            setIsSaving(false);
+        }
     };
     
     return (
@@ -1072,7 +1084,9 @@ function EditPlaylistModal({ playlist, onClose }) {
                     </div>
                     <div className="bg-gray-800 px-6 py-4 flex justify-end space-x-3 rounded-b-lg">
                         <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-300 bg-transparent rounded-md hover:bg-gray-700">Cancel</button>
-                        <button type="submit" className="px-4 py-2 text-sm font-medium text-black bg-white rounded-full hover:scale-105">Save</button>
+                        <button type="submit" disabled={isSaving} className="px-4 py-2 text-sm font-medium text-black bg-white rounded-full hover:scale-105 disabled:opacity-50">
+                            {isSaving ? "Saving..." : "Save"}
+                        </button>
                     </div>
                 </form>
             </div>
@@ -1080,19 +1094,29 @@ function EditPlaylistModal({ playlist, onClose }) {
     )
 }
 
-
 function DeleteConfirmationModal({ playlist, onClose }) {
-    const { token, setLibraryVersion, setView } = useContext(AppContext);
+    const { token, setLibraryVersion, setView, setSelectedPlaylistId } = useContext(AppContext);
+    const [isDeleting, setIsDeleting] = useState(false);
     
     const handleDelete = async () => {
-        // This actually "unfollows" the playlist
-        await fetch(`https://api.spotify.com/v1/playlists/${playlist.id}/followers`, {
-            method: 'DELETE',
-            headers: { Authorization: `Bearer ${token}` }
-        });
-        setLibraryVersion(v => v + 1); // Trigger a refresh
-        setView('home'); // Go to home after deleting
-        onClose();
+        setIsDeleting(true);
+        try {
+            const response = await fetch(`https://api.spotify.com/v1/playlists/${playlist.id}/followers`, {
+                method: 'DELETE',
+                headers: { Authorization: `Bearer ${token}` }
+            });
+             if (!response.ok) {
+                throw new Error('Failed to delete playlist.');
+            }
+            setLibraryVersion(v => v + 1); 
+            setSelectedPlaylistId(null);
+            setView('home'); 
+            onClose();
+        } catch (error) {
+            console.error("Error deleting playlist:", error);
+            alert("Could not delete playlist.");
+             setIsDeleting(false);
+        }
     };
 
     return (
@@ -1101,14 +1125,15 @@ function DeleteConfirmationModal({ playlist, onClose }) {
                 <h3 className="text-xl font-semibold text-white mb-2">Delete playlist</h3>
                 <p className="text-gray-300 mb-6">Are you sure you want to delete "{playlist.name}"? This action cannot be undone.</p>
                 <div className="flex justify-end space-x-4">
-                     <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-300 bg-transparent rounded-md hover:bg-gray-700">Cancel</button>
-                     <button onClick={handleDelete} className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700">Yes, Delete</button>
+                     <button onClick={onClose} disabled={isDeleting} className="px-4 py-2 text-sm font-medium text-gray-300 bg-transparent rounded-md hover:bg-gray-700 disabled:opacity-50">Cancel</button>
+                     <button onClick={handleDelete} disabled={isDeleting} className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700 disabled:opacity-50">
+                        {isDeleting ? "Deleting..." : "Yes, Delete"}
+                     </button>
                 </div>
             </div>
         </div>
     );
 }
-
 
 
 
