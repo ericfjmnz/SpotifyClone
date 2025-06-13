@@ -782,15 +782,6 @@ function PlaylistCreator() {
     
     // State for Custom Playlist
     const [customPlaylistName, setCustomPlaylistName] = useState('');
-    const [isGenreEnabled, setIsGenreEnabled] = useState(false);
-    const [genre, setGenre] = useState('');
-    const [isYearEnabled, setIsYearEnabled] = useState(false);
-    const [year, setYear] = useState('');
-    const [isBpmEnabled, setIsBpmEnabled] = useState(false);
-    const [bpm, setBpm] = useState(120);
-    const [availableGenres, setAvailableGenres] = useState([]);
-    const [artistGenres, setArtistGenres] = useState(new Map());
-    const [isGenreDataLoading, setIsGenreDataLoading] = useState(true);
     const [aiPrompt, setAiPrompt] = useState("");
 
     const getYesterdayDateParts = () => {
