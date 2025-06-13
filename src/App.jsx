@@ -801,8 +801,10 @@ function PlaylistCreator() {
                 const artistsData = await artistsResponse.json();
                 if (artistsData && artistsData.artists) {
                     artistsData.artists.forEach(artist => {
-                        artist.genres.forEach(g => genres.add(g));
-                        artistGenreMap.set(artist.id, artist.genres);
+                        if (artist && artist.genres) {
+                            artist.genres.forEach(g => genres.add(g));
+                            artistGenreMap.set(artist.id, artist.genres);
+                        }
                     });
                 }
             }
@@ -946,7 +948,7 @@ function PlaylistCreator() {
              }
              if (isGenreEnabled) {
                 const trackGenres = track.artists.flatMap(artist => artistGenres.get(artist.id) || []);
-                if(!trackGenres.includes(genre)) return false;
+                if(!trackGenres.some(g => g.includes(genre.toLowerCase()))) return false;
              }
              return true;
         });
@@ -1017,11 +1019,19 @@ function PlaylistCreator() {
                         {isGenreDataLoading ? (
                             <p className="text-gray-400">Loading genres...</p>
                         ) : (
-                            <select value={genre} onChange={e => setGenre(e.target.value)} className="w-full p-2 bg-gray-700 rounded-md border-gray-600 disabled:bg-gray-600" disabled={!isGenreEnabled}>
-                                <option value="">Select a genre</option>
-                                {availableGenres.map(g => <option key={g} value={g}>{g}</option>)}
-                            </select>
+                             <input
+                                list="genres"
+                                value={genre}
+                                onChange={e => setGenre(e.target.value)}
+                                placeholder="e.g., rock, electronic"
+                                className="w-full p-2 bg-gray-700 rounded-md border-gray-600 disabled:bg-gray-600"
+                                disabled={!isGenreEnabled}
+                            />
                         )}
+                        <datalist id="genres">
+                             {availableGenres.map(g => <option key={g} value={g} />)}
+                        </datalist>
+
                     </div>
                      <div className="flex items-center gap-4">
                         <input type="checkbox" id="year-toggle" checked={isYearEnabled} onChange={() => setIsYearEnabled(!isYearEnabled)} className="h-4 w-4 rounded text-green-500 focus:ring-green-500 border-gray-500"/>
