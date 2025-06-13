@@ -390,10 +390,14 @@ function RightSidebar() {
 }
 
 function PlayerBar() {
-    const { player, currentTrack, isPaused } = useContext(AppContext);
+    const { player, currentTrack, isPaused, isPlayerReady } = useContext(AppContext);
 
-    if (!player || !currentTrack) return <footer className="h-24 bg-black border-t border-gray-800 flex items-center justify-center"><p className="text-gray-400">No player available.</p></footer>;
+    if (!player) return <footer className="h-24 bg-black border-t border-gray-800 flex items-center justify-center"><p className="text-gray-400">Connecting to Spotify...</p></footer>;
     
+    if (!isPlayerReady) return <footer className="h-24 bg-black border-t border-gray-800 flex items-center justify-center"><p className="text-gray-400">Player not ready. Open a Spotify app on your computer or phone.</p></footer>;
+    
+    if (!currentTrack) return <footer className="h-24 bg-black border-t border-gray-800 flex items-center justify-center"><p className="text-gray-400">Select a song to play.</p></footer>;
+
     const togglePlay = () => {
         player.togglePlay();
     };
@@ -547,18 +551,20 @@ function HomePage() {
                 </div>
             </ContentSection>
             
-            <ContentSection title={featuredPlaylistsData?.message || "Featured Playlists"} loading={playlistsLoading} error={playlistsError}>
-                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
-                    {featuredPlaylistsData?.playlists.items.map(playlist => (
-                       <PlaylistCard 
-                            key={playlist.id} 
-                            imageUrl={playlist.images[0]?.url}
-                            title={playlist.name}
-                            subtitle={playlist.description.replace(/<[^>]*>?/gm, '')}
-                        />
-                    ))}
-                 </div>
-            </ContentSection>
+            {featuredPlaylistsUrl && 
+                <ContentSection title={featuredPlaylistsData?.message || "Featured Playlists"} loading={playlistsLoading} error={playlistsError}>
+                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
+                        {featuredPlaylistsData?.playlists.items.map(playlist => (
+                           <PlaylistCard 
+                                key={playlist.id} 
+                                imageUrl={playlist.images[0]?.url}
+                                title={playlist.name}
+                                subtitle={playlist.description.replace(/<[^>]*>?/gm, '')}
+                            />
+                        ))}
+                     </div>
+                </ContentSection>
+            }
 
             <ContentSection title="Your Top Artists" loading={artistsLoading} error={artistsError}>
                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
