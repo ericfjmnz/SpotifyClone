@@ -13,6 +13,8 @@ const SCOPES = [
     "playlist-read-private",
     "user-top-read",
     "user-read-recently-played",
+    "playlist-read-private", // Added for fetching user playlists
+    "playlist-read-collaborative" // Added for collaborative playlists
 ].join(" ");
 
 
@@ -241,6 +243,7 @@ export default function App() {
 
 function Sidebar({ logout }) {
     const { view, setView } = useContext(AppContext);
+    const { data: playlists, loading: playlistsLoading } = useSpotifyApi('/me/playlists');
     
     const NavItem = ({ label, targetView, icon }) => (
          <li
@@ -261,8 +264,18 @@ function Sidebar({ logout }) {
                 </ul>
             </div>
             <div className="bg-[#121212] rounded-lg p-2 mt-2 flex-1 overflow-y-auto">
-                 {/* Library Section Placeholder */}
-                 <p className="text-gray-400 p-2">Your Library</p>
+                 <h2 className="p-4 text-base font-semibold text-gray-300">Your Library</h2>
+                 {playlistsLoading ? (
+                     <p className="p-4 text-gray-400">Loading playlists...</p>
+                 ) : (
+                    <ul className="space-y-1">
+                        {playlists?.items.map(playlist => (
+                            <li key={playlist.id} className="text-gray-400 hover:text-white p-2 rounded-md cursor-pointer truncate text-sm">
+                                {playlist.name}
+                            </li>
+                        ))}
+                    </ul>
+                 )}
             </div>
              <div className="mt-auto pt-2">
                  <button onClick={logout} className="w-full text-left text-gray-400 hover:text-white p-4">Logout</button>
