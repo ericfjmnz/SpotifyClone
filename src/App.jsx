@@ -467,8 +467,6 @@ function VolumeControl() {
 function PlayerBar() {
     const { player, currentTrack, isPaused, isPlayerReady, position } = useContext(AppContext);
     const progressBarRef = useRef(null);
-    const [isSeeking, setIsSeeking] = useState(false);
-    const [seekValue, setSeekValue] = useState(0);
 
     const formatDuration = (ms) => {
         const totalSeconds = Math.floor(ms / 1000);
@@ -487,56 +485,17 @@ function PlayerBar() {
         player.togglePlay();
     };
     
-    const displayPosition = isSeeking ? seekValue : position;
-    const progress = currentTrack ? (displayPosition / currentTrack.duration_ms) * 100 : 0;
-    
+    const progress = currentTrack ? (position / currentTrack.duration_ms) * 100 : 0;
+
     const handleSeek = (e) => {
-         if (progressBarRef.current && currentTrack) {
+        if (progressBarRef.current && currentTrack) {
             const rect = progressBarRef.current.getBoundingClientRect();
             const clickX = e.clientX - rect.left;
-            let percentage = clickX / rect.width;
-            if (percentage < 0) percentage = 0;
-            if (percentage > 1) percentage = 1;
-            const newPosition = Math.round(percentage * currentTrack.duration_ms);
+            const percentage = clickX / rect.width;
+            const newPosition = percentage * currentTrack.duration_ms;
             player.seek(newPosition);
         }
     };
-    
-    const handleMouseDown = (e) => {
-        setIsSeeking(true);
-        const rect = progressBarRef.current.getBoundingClientRect();
-        const clickX = e.clientX - rect.left;
-        const percentage = clickX / rect.width;
-        setSeekValue(percentage * currentTrack.duration_ms);
-    };
-
-    const handleMouseMove = useCallback((e) => {
-        if (isSeeking && progressBarRef.current && currentTrack) {
-            const rect = progressBarRef.current.getBoundingClientRect();
-            const moveX = e.clientX - rect.left;
-            let percentage = moveX / rect.width;
-            if (percentage < 0) percentage = 0;
-            if (percentage > 1) percentage = 1;
-            setSeekValue(percentage * currentTrack.duration_ms);
-        }
-    }, [isSeeking, currentTrack]);
-
-    const handleMouseUp = useCallback(() => {
-        if (isSeeking) {
-            player.seek(seekValue);
-            setIsSeeking(false);
-        }
-    }, [isSeeking, seekValue, player]);
-
-    useEffect(() => {
-        document.addEventListener('mousemove', handleMouseMove);
-        document.addEventListener('mouseup', handleMouseUp);
-        return () => {
-            document.removeEventListener('mousemove', handleMouseMove);
-            document.removeEventListener('mouseup', handleMouseUp);
-        };
-    }, [handleMouseMove, handleMouseUp]);
-
 
     return (
         <footer className="h-24 bg-black border-t border-gray-800 flex items-center justify-between px-4 text-white">
@@ -559,13 +518,8 @@ function PlayerBar() {
                     <button className="text-gray-400 hover:text-white">»</button>
                  </div>
                  <div className="w-full flex items-center gap-2 text-xs text-gray-400">
-                    <span>{formatDuration(displayPosition)}</span>
-                    <div 
-                        ref={progressBarRef} 
-                        onMouseDown={handleMouseDown}
-                        onClick={handleSeek}
-                        className="w-full h-1 bg-gray-700 rounded-full cursor-pointer group"
-                    >
+                    <span>{formatDuration(position)}</span>
+                    <div ref={progressBarRef} onClick={handleSeek} className="w-full h-1 bg-gray-700 rounded-full cursor-pointer group">
                         <div style={{ width: `${progress}%` }} className="h-full bg-white rounded-full group-hover:bg-green-500 relative">
                            <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full opacity-0 group-hover:opacity-100"></div>
                         </div>
@@ -728,12 +682,7 @@ function PlaylistView({ playlistId }) {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${token}`
             },
-            body: JSON.stringify({ 
-                context_uri: playlist.uri,
-                offset: {
-                    uri: trackUri,
-                }
-            })
+            body: JSON.stringify({ uris: [trackUri] })
         });
     };
 
@@ -952,7 +901,7 @@ function PlaylistCreator() {
                     }
                 }
             };
-            const apiKey = ""; // IMPORTANT: Add your Gemini API Key here
+            const apiKey = "AIzaSyAsb7lrYNWBzSIUe5RUCOCMib20FzAX61M"; // IMPORTANT: Add your Gemini API Key here
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
             const geminiResponse = await fetch(apiUrl, {
                 method: 'POST',
@@ -1186,4 +1135,5 @@ function DeleteConfirmationModal({ playlist, onClose }) {
         </div>
     );
 }
+
 
