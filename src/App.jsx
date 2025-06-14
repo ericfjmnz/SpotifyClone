@@ -796,13 +796,6 @@ function PlaylistCreator() {
     const { year: yesterdayYear, month: yesterdayMonth, day: yesterdayDay } = getYesterdayDateParts();
 
     const handleCreateWQXRPlaylist = async () => {
-        // NOTE: This function requires a local proxy server to be running
-        // to bypass CORS restrictions when fetching from wqxr.org.
-        // This is a known limitation for client-side only apps.
-        // setError("This feature is currently disabled because it requires a backend proxy server to work correctly. See code comments for details.");
-        // return;
-
-        
         if(!profile) {
             setError('Could not get user profile. Please try again.');
             return;
@@ -814,6 +807,7 @@ function PlaylistCreator() {
 
         try {
             const { year, month, day } = getYesterdayDateParts();
+            // NOTE: This fetch requires a local proxy to bypass CORS.
             const proxyResponse = await fetch(`http://localhost:3001/wqxr-playlist?year=${year}&month=${month}&day=${day}`);
             
             if (!proxyResponse.ok) throw new Error('Failed to fetch data from proxy server. Make sure it is running.');
@@ -866,7 +860,6 @@ function PlaylistCreator() {
         } finally {
             setIsWqxrLoading(false);
         }
-        
     };
     
     const resetCustomForm = () => {
@@ -1012,6 +1005,21 @@ function PlaylistCreator() {
                 </div>
             )}
             
+             <div className="bg-gray-800 p-6 rounded-lg">
+                <h2 className="text-xl font-semibold mb-2">WQXR Daily Playlist</h2>
+                <p className="text-gray-400 mb-4">
+                    Create a new playlist based on the music played yesterday ({yesterdayDay}-{yesterdayMonth}-{yesterdayYear}) on WQXR.
+                    <span className="block text-xs mt-1">(Requires a local proxy server to be running)</span>
+                </p>
+                <button 
+                    onClick={handleCreateWQXRPlaylist} 
+                    disabled={isWqxrLoading || isCustomLoading}
+                    className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
+                >
+                    {isWqxrLoading ? 'Creating...' : "Create Yesterday's Playlist"}
+                </button>
+            </div>
+
             <div className="bg-gray-800 p-6 rounded-lg">
                 <h2 className="text-xl font-semibold mb-2">AI-Powered Playlist Creator</h2>
                 <p className="text-gray-400 mb-4">
@@ -1033,20 +1041,6 @@ function PlaylistCreator() {
                     className="mt-6 bg-green-600 hover:bg-green-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
                 >
                     {isCustomLoading ? 'Creating...' : "Create AI Playlist"}
-                </button>
-            </div>
-
-            <div className="bg-gray-800 p-6 rounded-lg opacity-50">
-                <h2 className="text-xl font-semibold mb-2">WQXR Daily Playlist</h2>
-                <p className="text-gray-400 mb-4">
-                    Create a new playlist based on the music played yesterday ({yesterdayDay}-{yesterdayMonth}-{yesterdayYear}) on WQXR. (Requires a backend proxy).
-                </p>
-                <button 
-                    onClick={handleCreateWQXRPlaylist} 
-                    disabled={true}
-                    className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 disabled:cursor-not-allowed text-white font-bold py-2 px-6 rounded-full"
-                >
-                    Create Yesterday's Playlist
                 </button>
             </div>
         </div>
