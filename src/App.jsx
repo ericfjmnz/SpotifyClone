@@ -1003,19 +1003,11 @@ function PlaylistCreator() {
             
             {error && <div className="p-3 bg-red-800 text-white rounded-md mb-4">{error}</div>}
             {status && !error && <div className="p-3 bg-blue-800 text-white rounded-md mb-4">{status}</div>}
-            {createdPlaylist && (
-                <div className="mt-4 p-3 bg-green-800 rounded-md">
-                    <a href={createdPlaylist.external_urls.spotify} target="_blank" rel="noopener noreferrer" className="text-white font-semibold hover:underline">
-                        Open your new playlist: "{createdPlaylist.name}"
-                    </a>
-                </div>
-            )}
             
              <div className="bg-gray-800 p-6 rounded-lg">
                 <h2 className="text-xl font-semibold mb-2">WQXR Daily Playlist</h2>
                 <p className="text-gray-400 mb-4">
                     Create a new playlist based on the music played yesterday ({yesterdayDay}-{yesterdayMonth}-{yesterdayYear}) on WQXR.
-                    <span className="block text-xs mt-1">(Requires a local proxy server to be running)</span>
                 </p>
                 <button 
                     onClick={handleCreateWQXRPlaylist} 
