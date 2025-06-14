@@ -803,7 +803,7 @@ function PlaylistCreator() {
         setIsWqxrLoading(true);
         setError('');
         setCreatedPlaylist(null);
-        setStatus('Starting WQXR playlist creation...');
+        setStatus('Requesting playlist from proxy server...');
 
         try {
             const { year, month, day } = getYesterdayDateParts();
