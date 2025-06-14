@@ -729,10 +729,7 @@ function PlaylistView({ playlistId }) {
                 'Authorization': `Bearer ${token}`
             },
             body: JSON.stringify({ 
-                context_uri: playlist.uri,
-                offset: {
-                    uri: trackUri,
-                }
+                uris: [trackUri]
             })
         });
     };
@@ -809,6 +806,7 @@ function PlaylistCreator() {
     const [createdPlaylist, setCreatedPlaylist] = useState(null);
     const [isWqxrLoading, setIsWqxrLoading] = useState(false);
     const [isCustomLoading, setIsCustomLoading] = useState(false);
+    const { data: topArtists } = useSpotifyApi('/me/top/artists?limit=10');
     
     // State for Custom Playlist
     const [customPlaylistName, setCustomPlaylistName] = useState('');
@@ -833,38 +831,27 @@ function PlaylistCreator() {
         setIsWqxrLoading(true);
         setError('');
         setCreatedPlaylist(null);
-        setStatus('Requesting playlist from proxy server...');
+        setStatus('Starting WQXR playlist creation...');
 
         try {
-            const { year, month, day } = getYesterdayDateParts();
-    
-            const proxyResponse = await fetch(`http://localhost:3001/wqxr-playlist?year=${year}&month=${month}&day=${day}`);
+            const simulatedTracks = [
+                { title: 'Symphony No. 5', composer: 'Beethoven' },
+                { title: 'The Four Seasons', composer: 'Vivaldi' },
+                { title: 'Clair de Lune', composer: 'Debussy' },
+                { title: 'Eine kleine Nachtmusik', composer: 'Mozart' },
+                { title: 'Nocturne in E-flat major, Op. 9 No. 2', composer: 'Chopin'}
+            ];
             
-            if (!proxyResponse.ok) {
-                throw new Error('Failed to fetch data from proxy server. Make sure it is running.');
-            }
-    
-            const data = await proxyResponse.json();
-            const wqxrTracks = data.tracks;
-    
-            if (!wqxrTracks || wqxrTracks.length === 0) {
-                setError('Could not parse any tracks from the WQXR playlist.');
-                setStatus('');
-                setIsWqxrLoading(false);
-                return;
-            }
-            
-            setStatus(`Found ${wqxrTracks.length} tracks. Searching on Spotify...`);
-            
+            setStatus('Searching for WQXR tracks on Spotify...');
             const trackUris = [];
-            for (const track of wqxrTracks) {
+            for (const track of simulatedTracks) {
                 const query = encodeURIComponent(`track:${track.title} artist:${track.composer}`);
                 const response = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, {
                     headers: { Authorization: `Bearer ${token}` }
                 });
-                const searchData = await response.json();
-                if (searchData.tracks.items.length > 0) {
-                    trackUris.push(searchData.tracks.items[0].uri);
+                const data = await response.json();
+                if (data.tracks.items.length > 0) {
+                    trackUris.push(data.tracks.items[0].uri);
                 }
             }
     
@@ -927,7 +914,9 @@ function PlaylistCreator() {
         setStatus('Asking AI for song ideas... This may take a moment.');
 
         try {
-            const geminiPrompt = `Based on the following theme: "${aiPrompt}", generate a list of 100 suitable songs. Include a mix of popular and less common tracks if possible.`;
+            const artistNames = topArtists ? topArtists.items.map(a => a.name).join(', ') : "a variety of artists";
+            const geminiPrompt = `Based on the following theme: "${aiPrompt}", and inspired by artists like ${artistNames}, generate a list of 20 suitable songs. Include a mix of popular and less common tracks if possible.`;
+            
             let chatHistory = [{ role: "user", parts: [{ text: geminiPrompt }] }];
             const payload = {
                 contents: chatHistory,
@@ -952,7 +941,7 @@ function PlaylistCreator() {
                     }
                 }
             };
-            const apiKey = "AIzaSyAsb7lrYNWBzSIUe5RUCOCMib20FzAX61M"; // IMPORTANT: Add your Gemini API Key here
+            const apiKey = ""; // IMPORTANT: Add your Gemini API Key here
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
             const geminiResponse = await fetch(apiUrl, {
                 method: 'POST',
@@ -978,7 +967,7 @@ function PlaylistCreator() {
             setStatus('Searching for suggested songs on Spotify...');
             const trackUris = [];
             for (const song of aiSuggestions) {
-                 const query = encodeURIComponent(`track:${song.track} artist:${song.artist}`);
+                 const query = encodeURIComponent(`${song.track} ${song.artist}`);
                  const searchResponse = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, {
                     headers: { Authorization: `Bearer ${token}` }
                  });
