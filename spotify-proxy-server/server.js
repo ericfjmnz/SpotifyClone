@@ -10,9 +10,9 @@ const PORT = 3001; // We'll run this on a different port than the React app
 app.use(cors());
 
 // Define the proxy endpoint
-console.log('hi');
+
 app.get('/wqxr-playlist', async (req, res) => {
-    console.log('second hi');
+
   // Get date parts from the query parameters sent by the React app
   const { year, month, day } = req.query;
 
@@ -20,8 +20,8 @@ app.get('/wqxr-playlist', async (req, res) => {
     return res.status(400).json({ error: 'Missing required date parameters (year, month, day).' });
   }
 
-  const url = `https://wqxr-legacy.prod.nypr.digital/playlist-daily/2024/may/24/?scheduleStation=q2`;
-
+  const url = 'https://wqxr-legacy.prod.nypr.digital/playlist-daily/2025/jun/12/?scheduleStation=q2';
+//  console.log(url);
   try {
     // Use axios to fetch the HTML content from the WQXR playlist page
     const { data } = await axios.get(url);
@@ -37,13 +37,13 @@ app.get('/wqxr-playlist', async (req, res) => {
       // For each song, find the title and the composer
       // **FIX**: Use .text() and .trim() to extract the string content from the HTML elements
       const title = $(element).find('.playlist-item__title').text().trim();
-      const composer = $(element).find('.playlist-item__composer').text().trim();
+      const composer = $(element).find('.playlist-item__musicians').text().trim();
 
       if (title && composer) {
         tracks.push({ title, composer });
       }
     });
-    console.log(tracks);
+    console.table(tracks);
     // Send the extracted track data back to our React app as JSON
     res.json({ tracks });
 
@@ -62,7 +62,7 @@ app.listen(PORT, () => {
 
 // // A hardcoded URL with a known-good playlist for consistent testing.
 // // You can change the date in this URL to test different days.
-// const TEST_URL = 'https://wqxr-legacy.prod.nypr.digital/playlist-daily/2024/may/24/?scheduleStation=q2';
+// const TEST_URL = 'https://wqxr-legacy.prod.nypr.digital/playlist-daily/2025/jun/12/?scheduleStation=q2';
 
 // async function testScraper() {
 //   console.log(`Fetching data from: ${TEST_URL}`);
