@@ -1044,10 +1044,12 @@ function EditPlaylistModal({ playlist, onClose }) {
     const [name, setName] = useState(playlist.name);
     const [description, setDescription] = useState(playlist.description || "");
     const [isSaving, setIsSaving] = useState(false);
+    const [error, setError] = useState("");
 
     const handleSave = async (e) => {
         e.preventDefault();
         setIsSaving(true);
+        setError("");
         try {
             const response = await fetch(`https://api.spotify.com/v1/playlists/${playlist.id}`, {
                 method: 'PUT',
@@ -1058,13 +1060,14 @@ function EditPlaylistModal({ playlist, onClose }) {
                 body: JSON.stringify({ name, description })
             });
              if (!response.ok) {
-                throw new Error('Failed to update playlist.');
+                const errorData = await response.json();
+                throw new Error(errorData.error.message || 'Failed to update playlist.');
             }
             setLibraryVersion(v => v + 1); 
             onClose();
         } catch (error) {
             console.error("Error updating playlist:", error);
-            alert("Could not update playlist.");
+            setError(error.message);
         } finally {
             setIsSaving(false);
         }
@@ -1076,6 +1079,7 @@ function EditPlaylistModal({ playlist, onClose }) {
                 <form onSubmit={handleSave}>
                     <div className="p-6">
                         <h3 className="text-xl font-semibold text-white mb-4">Edit details</h3>
+                        {error && <p className="text-red-400 mb-4">{error}</p>}
                         <div className="space-y-4">
                              <div>
                                 <label htmlFor="name" className="block text-sm font-bold text-gray-300 mb-1">Name</label>
@@ -1107,12 +1111,14 @@ function DeleteConfirmationModal({ playlist, onClose }) {
     const handleDelete = async () => {
         setIsDeleting(true);
         try {
+            // Unfollowing a playlist is the standard way to "delete" it from a user's library
             const response = await fetch(`https://api.spotify.com/v1/playlists/${playlist.id}/followers`, {
                 method: 'DELETE',
                 headers: { Authorization: `Bearer ${token}` }
             });
              if (!response.ok) {
-                throw new Error('Failed to delete playlist.');
+                const errorData = await response.json();
+                throw new Error(errorData.error.message || 'Failed to delete playlist.');
             }
             setLibraryVersion(v => v + 1); 
             setSelectedPlaylistId(null);
@@ -1120,7 +1126,7 @@ function DeleteConfirmationModal({ playlist, onClose }) {
             onClose();
         } catch (error) {
             console.error("Error deleting playlist:", error);
-            alert("Could not delete playlist.");
+            alert("Could not delete playlist: " + error.message);
              setIsDeleting(false);
         }
     };
