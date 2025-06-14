@@ -623,6 +623,9 @@ function HomePage() {
             setProfile(profileData);
             if(profileData.country) {
                 setFeaturedPlaylistsUrl(`/browse/featured-playlists?country=${profileData.country}&limit=5`);
+            } else {
+                 // **FIX**: Default to 'US' if country is not available
+                setFeaturedPlaylistsUrl(`/browse/featured-playlists?country=US&limit=5`);
             }
         }
     }, [profileData, setProfile]);
@@ -803,7 +806,7 @@ function PlaylistCreator() {
         setIsWqxrLoading(true);
         setError('');
         setCreatedPlaylist(null);
-        setStatus('Requesting playlist from proxy server...');
+        setStatus('Starting WQXR playlist creation...');
 
         try {
             const { year, month, day } = getYesterdayDateParts();
