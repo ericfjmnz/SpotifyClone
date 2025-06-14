@@ -616,19 +616,15 @@ function PlaylistCard({ imageUrl, title, subtitle, isArtist = false }) {
 function HomePage() {
     const { setProfile } = useContext(AppContext);
     const { data: profileData } = useSpotifyApi('/me');
-    const [featuredPlaylistsUrl, setFeaturedPlaylistsUrl] = useState(null);
+    const { data: topArtists, loading: artistsLoading, error: artistsError } = useSpotifyApi('/me/top/artists?limit=5');
+    const { data: recent, loading: recentLoading, error: recentError } = useSpotifyApi('/me/player/recently-played?limit=6');
 
     useEffect(() => {
         if(profileData) {
             setProfile(profileData);
-            setFeaturedPlaylistsUrl(`/browse/featured-playlists?country=${profileData.country || 'US'}&limit=5`);
         }
     }, [profileData, setProfile]);
     
-    const { data: featuredPlaylistsData, loading: playlistsLoading, error: playlistsError } = useSpotifyApi(featuredPlaylistsUrl);
-    const { data: topArtists, loading: artistsLoading, error: artistsError } = useSpotifyApi('/me/top/artists?limit=5');
-    const { data: recent, loading: recentLoading, error: recentError } = useSpotifyApi('/me/player/recently-played?limit=6');
-
     const getGreeting = () => {
         const hour = new Date().getHours();
         if (hour < 12) return "Good morning";
@@ -653,21 +649,6 @@ function HomePage() {
                     ))}
                 </div>
             </ContentSection>
-            
-            {featuredPlaylistsUrl && 
-                <ContentSection title={featuredPlaylistsData?.message || "Featured Playlists"} loading={playlistsLoading} error={playlistsError}>
-                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
-                        {featuredPlaylistsData?.playlists.items.map(playlist => (
-                           <PlaylistCard 
-                                key={playlist.id} 
-                                imageUrl={playlist.images[0]?.url}
-                                title={playlist.name}
-                                subtitle={playlist.description.replace(/<[^>]*>?/gm, '')}
-                            />
-                        ))}
-                     </div>
-                </ContentSection>
-            }
 
             <ContentSection title="Your Top Artists" loading={artistsLoading} error={artistsError}>
                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
@@ -804,35 +785,25 @@ function PlaylistCreator() {
         setStatus('Starting WQXR playlist creation...');
 
         try {
-            const { year, month, day } = getYesterdayDateParts();
-    
-            const proxyResponse = await fetch(`http://localhost:3001/wqxr-playlist?year=${year}&month=${month}&day=${day}`);
+            setStatus('Simulating fetch from WQXR...');
+            const simulatedTracks = [
+                { title: 'Symphony No. 5', composer: 'Beethoven' },
+                { title: 'The Four Seasons', composer: 'Vivaldi' },
+                { title: 'Clair de Lune', composer: 'Debussy' },
+                { title: 'Eine kleine Nachtmusik', composer: 'Mozart' },
+                { title: 'Nocturne in E-flat major, Op. 9 No. 2', composer: 'Chopin'}
+            ];
             
-            if (!proxyResponse.ok) {
-                throw new Error('Failed to fetch data from proxy server. Make sure it is running.');
-            }
-    
-            const data = await proxyResponse.json();
-            const wqxrTracks = data.tracks;
-    
-            if (!wqxrTracks || wqxrTracks.length === 0) {
-                setError('Could not parse any tracks from the WQXR playlist.');
-                setStatus('');
-                setIsWqxrLoading(false);
-                return;
-            }
-            
-            setStatus(`Found ${wqxrTracks.length} tracks. Searching on Spotify...`);
-            
+            setStatus('Searching for WQXR tracks on Spotify...');
             const trackUris = [];
-            for (const track of wqxrTracks) {
+            for (const track of simulatedTracks) {
                 const query = encodeURIComponent(`track:${track.title} artist:${track.composer}`);
                 const response = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, {
                     headers: { Authorization: `Bearer ${token}` }
                 });
-                const searchData = await response.json();
-                if (searchData.tracks.items.length > 0) {
-                    trackUris.push(searchData.tracks.items[0].uri);
+                const data = await response.json();
+                if (data.tracks.items.length > 0) {
+                    trackUris.push(data.tracks.items[0].uri);
                 }
             }
     
@@ -1154,5 +1125,6 @@ function DeleteConfirmationModal({ playlist, onClose }) {
         </div>
     );
 }
+
 
 
