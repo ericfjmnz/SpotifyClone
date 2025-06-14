@@ -699,7 +699,7 @@ function PlaylistView({ playlistId }) {
     return (
         <div className="text-white">
             <header className="flex items-end gap-6 mb-8">
-                <img src={playlist.images[0]?.url} alt="" className="w-48 h-48 shadow-2xl"/>
+                <img src={playlist.images?.[0]?.url || 'https://placehold.co/192x192/181818/FFFFFF?text=Playlist'} alt="" className="w-48 h-48 shadow-2xl"/>
                 <div>
                     <p className="text-sm font-bold">Playlist</p>
                     <h1 className="text-5xl font-extrabold">{playlist.name}</h1>
@@ -758,6 +758,7 @@ function PlaylistCreator() {
     const [createdPlaylist, setCreatedPlaylist] = useState(null);
     const [isWqxrLoading, setIsWqxrLoading] = useState(false);
     const [isCustomLoading, setIsCustomLoading] = useState(false);
+    const [wqxrProgress, setWqxrProgress] = useState(0);
     
     // State for Custom Playlist
     const [customPlaylistName, setCustomPlaylistName] = useState('');
@@ -783,6 +784,7 @@ function PlaylistCreator() {
         setError('');
         setCreatedPlaylist(null);
         setStatus('Requesting playlist from proxy server...');
+        setWqxrProgress(0);
 
         try {
             const { year, month, day } = getYesterdayDateParts();
@@ -803,10 +805,11 @@ function PlaylistCreator() {
                 return;
             }
             
-            setStatus(`Found ${wqxrTracks.length} tracks. Searching on Spotify...`);
+            const totalTracks = wqxrTracks.length;
+            setStatus(`Found ${totalTracks} tracks. Searching on Spotify...`);
             
             const trackUris = [];
-            for (const track of wqxrTracks) {
+            for (const [index, track] of wqxrTracks.entries()) {
                 const query = encodeURIComponent(`track:${track.title} artist:${track.composer}`);
                 const response = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, {
                     headers: { Authorization: `Bearer ${token}` }
@@ -815,6 +818,7 @@ function PlaylistCreator() {
                 if (searchData.tracks.items.length > 0) {
                     trackUris.push(searchData.tracks.items[0].uri);
                 }
+                setWqxrProgress(((index + 1) / totalTracks) * 100);
             }
     
             if (trackUris.length === 0) {
@@ -901,7 +905,7 @@ function PlaylistCreator() {
                     }
                 }
             };
-            const apiKey = "AIzaSyAsb7lrYNWBzSIUe5RUCOCMib20FzAX61M"; // IMPORTANT: Add your Gemini API Key here
+            const apiKey = ""; // IMPORTANT: Add your Gemini API Key here
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
             const geminiResponse = await fetch(apiUrl, {
                 method: 'POST',
@@ -990,6 +994,13 @@ function PlaylistCreator() {
                 >
                     {isWqxrLoading ? 'Creating...' : "Create Yesterday's Playlist"}
                 </button>
+                {isWqxrLoading && (
+                    <div className="mt-4">
+                        <div className="w-full bg-gray-700 rounded-full h-2.5">
+                            <div className="bg-blue-600 h-2.5 rounded-full" style={{ width: `${wqxrProgress}%` }}></div>
+                        </div>
+                    </div>
+                 )}
             </div>
 
             <div className="bg-gray-800 p-6 rounded-lg">
