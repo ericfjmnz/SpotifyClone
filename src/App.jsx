@@ -467,8 +467,6 @@ function VolumeControl() {
 function PlayerBar() {
     const { player, currentTrack, isPaused, isPlayerReady, position } = useContext(AppContext);
     const progressBarRef = useRef(null);
-    const [isSeeking, setIsSeeking] = useState(false);
-    const [seekValue, setSeekValue] = useState(0);
 
     const formatDuration = (ms) => {
         const totalSeconds = Math.floor(ms / 1000);
@@ -487,56 +485,17 @@ function PlayerBar() {
         player.togglePlay();
     };
     
-    const displayPosition = isSeeking ? seekValue : position;
-    const progress = currentTrack ? (displayPosition / currentTrack.duration_ms) * 100 : 0;
-    
+    const progress = currentTrack ? (position / currentTrack.duration_ms) * 100 : 0;
+
     const handleSeek = (e) => {
-         if (progressBarRef.current && currentTrack) {
+        if (progressBarRef.current && currentTrack) {
             const rect = progressBarRef.current.getBoundingClientRect();
             const clickX = e.clientX - rect.left;
-            let percentage = clickX / rect.width;
-            if (percentage < 0) percentage = 0;
-            if (percentage > 1) percentage = 1;
-            const newPosition = Math.round(percentage * currentTrack.duration_ms);
+            const percentage = clickX / rect.width;
+            const newPosition = percentage * currentTrack.duration_ms;
             player.seek(newPosition);
         }
     };
-    
-    const handleMouseDown = (e) => {
-        setIsSeeking(true);
-        const rect = progressBarRef.current.getBoundingClientRect();
-        const clickX = e.clientX - rect.left;
-        const percentage = clickX / rect.width;
-        setSeekValue(percentage * currentTrack.duration_ms);
-    };
-
-    const handleMouseMove = useCallback((e) => {
-        if (isSeeking && progressBarRef.current && currentTrack) {
-            const rect = progressBarRef.current.getBoundingClientRect();
-            const moveX = e.clientX - rect.left;
-            let percentage = moveX / rect.width;
-            if (percentage < 0) percentage = 0;
-            if (percentage > 1) percentage = 1;
-            setSeekValue(percentage * currentTrack.duration_ms);
-        }
-    }, [isSeeking, currentTrack]);
-
-    const handleMouseUp = useCallback(() => {
-        if (isSeeking) {
-            player.seek(seekValue);
-            setIsSeeking(false);
-        }
-    }, [isSeeking, seekValue, player]);
-
-    useEffect(() => {
-        document.addEventListener('mousemove', handleMouseMove);
-        document.addEventListener('mouseup', handleMouseUp);
-        return () => {
-            document.removeEventListener('mousemove', handleMouseMove);
-            document.removeEventListener('mouseup', handleMouseUp);
-        };
-    }, [handleMouseMove, handleMouseUp]);
-
 
     return (
         <footer className="h-24 bg-black border-t border-gray-800 flex items-center justify-between px-4 text-white">
@@ -559,13 +518,8 @@ function PlayerBar() {
                     <button className="text-gray-400 hover:text-white">»</button>
                  </div>
                  <div className="w-full flex items-center gap-2 text-xs text-gray-400">
-                    <span>{formatDuration(displayPosition)}</span>
-                    <div 
-                        ref={progressBarRef} 
-                        onMouseDown={handleMouseDown}
-                        onClick={handleSeek}
-                        className="w-full h-1 bg-gray-700 rounded-full cursor-pointer group"
-                    >
+                    <span>{formatDuration(position)}</span>
+                    <div ref={progressBarRef} onClick={handleSeek} className="w-full h-1 bg-gray-700 rounded-full cursor-pointer group">
                         <div style={{ width: `${progress}%` }} className="h-full bg-white rounded-full group-hover:bg-green-500 relative">
                            <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full opacity-0 group-hover:opacity-100"></div>
                         </div>
@@ -728,9 +682,7 @@ function PlaylistView({ playlistId }) {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${token}`
             },
-            body: JSON.stringify({ 
-                uris: [trackUri]
-            })
+            body: JSON.stringify({ uris: [trackUri] })
         });
     };
 
@@ -806,7 +758,6 @@ function PlaylistCreator() {
     const [createdPlaylist, setCreatedPlaylist] = useState(null);
     const [isWqxrLoading, setIsWqxrLoading] = useState(false);
     const [isCustomLoading, setIsCustomLoading] = useState(false);
-    const { data: topArtists } = useSpotifyApi('/me/top/artists?limit=10');
     
     // State for Custom Playlist
     const [customPlaylistName, setCustomPlaylistName] = useState('');
@@ -831,27 +782,38 @@ function PlaylistCreator() {
         setIsWqxrLoading(true);
         setError('');
         setCreatedPlaylist(null);
-        setStatus('Starting WQXR playlist creation...');
+        setStatus('Requesting playlist from proxy server...');
 
         try {
-            const simulatedTracks = [
-                { title: 'Symphony No. 5', composer: 'Beethoven' },
-                { title: 'The Four Seasons', composer: 'Vivaldi' },
-                { title: 'Clair de Lune', composer: 'Debussy' },
-                { title: 'Eine kleine Nachtmusik', composer: 'Mozart' },
-                { title: 'Nocturne in E-flat major, Op. 9 No. 2', composer: 'Chopin'}
-            ];
+            const { year, month, day } = getYesterdayDateParts();
+    
+            const proxyResponse = await fetch(`http://localhost:3001/wqxr-playlist?year=${year}&month=${month}&day=${day}`);
             
-            setStatus('Searching for WQXR tracks on Spotify...');
+            if (!proxyResponse.ok) {
+                throw new Error('Failed to fetch data from proxy server. Make sure it is running.');
+            }
+    
+            const data = await proxyResponse.json();
+            const wqxrTracks = data.tracks;
+    
+            if (!wqxrTracks || wqxrTracks.length === 0) {
+                setError('Could not parse any tracks from the WQXR playlist.');
+                setStatus('');
+                setIsWqxrLoading(false);
+                return;
+            }
+            
+            setStatus(`Found ${wqxrTracks.length} tracks. Searching on Spotify...`);
+            
             const trackUris = [];
-            for (const track of simulatedTracks) {
+            for (const track of wqxrTracks) {
                 const query = encodeURIComponent(`track:${track.title} artist:${track.composer}`);
                 const response = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, {
                     headers: { Authorization: `Bearer ${token}` }
                 });
-                const data = await response.json();
-                if (data.tracks.items.length > 0) {
-                    trackUris.push(data.tracks.items[0].uri);
+                const searchData = await response.json();
+                if (searchData.tracks.items.length > 0) {
+                    trackUris.push(searchData.tracks.items[0].uri);
                 }
             }
     
@@ -914,9 +876,7 @@ function PlaylistCreator() {
         setStatus('Asking AI for song ideas... This may take a moment.');
 
         try {
-            const artistNames = topArtists ? topArtists.items.map(a => a.name).join(', ') : "a variety of artists";
-            const geminiPrompt = `Based on the following theme: "${aiPrompt}", and inspired by artists like ${artistNames}, generate a list of 20 suitable songs. Include a mix of popular and less common tracks if possible.`;
-            
+            const geminiPrompt = `Based on the following theme: "${aiPrompt}", generate a list of 100 suitable songs. Include a mix of popular and less common tracks if possible.`;
             let chatHistory = [{ role: "user", parts: [{ text: geminiPrompt }] }];
             const payload = {
                 contents: chatHistory,
@@ -941,7 +901,7 @@ function PlaylistCreator() {
                     }
                 }
             };
-            const apiKey = ""; // IMPORTANT: Add your Gemini API Key here
+            const apiKey = "AIzaSyAsb7lrYNWBzSIUe5RUCOCMib20FzAX61M"; // IMPORTANT: Add your Gemini API Key here
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
             const geminiResponse = await fetch(apiUrl, {
                 method: 'POST',
@@ -967,7 +927,7 @@ function PlaylistCreator() {
             setStatus('Searching for suggested songs on Spotify...');
             const trackUris = [];
             for (const song of aiSuggestions) {
-                 const query = encodeURIComponent(`${song.track} ${song.artist}`);
+                 const query = encodeURIComponent(`track:${song.track} artist:${song.artist}`);
                  const searchResponse = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, {
                     headers: { Authorization: `Bearer ${token}` }
                  });
@@ -1175,3 +1135,5 @@ function DeleteConfirmationModal({ playlist, onClose }) {
         </div>
     );
 }
+
+
