@@ -803,7 +803,7 @@ function PlaylistView({ playlistId }) {
 }
 
 function PlaylistCreator() {
-    const { token, setLibraryVersion, profile, selectedPlaylistId } = useContext(AppContext);
+    const { token, setLibraryVersion, profile } = useContext(AppContext);
     const [status, setStatus] = useState('');
     const [error, setError] = useState('');
     const [createdPlaylist, setCreatedPlaylist] = useState(null);
@@ -813,7 +813,6 @@ function PlaylistCreator() {
     // State for Custom Playlist
     const [customPlaylistName, setCustomPlaylistName] = useState('');
     const [aiPrompt, setAiPrompt] = useState("");
-    const [includeCurrentPlaylist, setIncludeCurrentPlaylist] = useState(false);
 
     const getYesterdayDateParts = () => {
         const yesterday = new Date();
@@ -905,7 +904,6 @@ function PlaylistCreator() {
     const resetCustomForm = () => {
         setCustomPlaylistName('');
         setAiPrompt('');
-        setIncludeCurrentPlaylist(false);
     };
 
     const handleCreateAiPlaylist = async () => {
@@ -929,16 +927,7 @@ function PlaylistCreator() {
         setStatus('Asking AI for song ideas... This may take a moment.');
 
         try {
-            let inspirationPrompt = "";
-            if (includeCurrentPlaylist && selectedPlaylistId) {
-                setStatus("Analyzing current playlist for inspiration...");
-                const response = await fetch(`https://api.spotify.com/v1/playlists/${selectedPlaylistId}/tracks`, { headers: { Authorization: `Bearer ${token}` } });
-                const playlistData = await response.json();
-                const inspirationTracks = playlistData.items.map(item => `${item.track.name} by ${item.track.artists[0].name}`).slice(0, 10).join(', ');
-                inspirationPrompt = ` Use the following songs as inspiration and for context on the user's taste: ${inspirationTracks}.`;
-            }
-
-            const geminiPrompt = `Based on the following theme: "${aiPrompt}",${inspirationPrompt} generate a list of 100 suitable songs. Include a mix of popular and less common tracks if possible.`;
+            const geminiPrompt = `Based on the following theme: "${aiPrompt}", generate a list of 100 suitable songs. Include a mix of popular and less common tracks if possible.`;
             let chatHistory = [{ role: "user", parts: [{ text: geminiPrompt }] }];
             const payload = {
                 contents: chatHistory,
@@ -963,7 +952,7 @@ function PlaylistCreator() {
                     }
                 }
             };
-            const apiKey = "AIzaSyAsb7lrYNWBzSIUe5RUCOCMib20FzAX61M"; // IMPORTANT: Add your Gemini API Key here
+            const apiKey = ""; // IMPORTANT: Add your Gemini API Key here
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
             const geminiResponse = await fetch(apiUrl, {
                 method: 'POST',
@@ -1067,10 +1056,6 @@ function PlaylistCreator() {
                      <div>
                         <label className="block mb-1 text-sm font-medium text-gray-300">Describe your playlist</label>
                         <textarea value={aiPrompt} onChange={e => setAiPrompt(e.target.value)} placeholder="e.g., an upbeat roadtrip playlist with 90s alternative rock" rows="3" className="w-full p-2 bg-gray-700 rounded-md border-gray-600" />
-                    </div>
-                     <div className="flex items-center gap-2">
-                        <input type="checkbox" id="ai-inspiration" checked={includeCurrentPlaylist} onChange={() => setIncludeCurrentPlaylist(!includeCurrentPlaylist)} disabled={!selectedPlaylistId} className="h-4 w-4 rounded text-green-500 focus:ring-green-500 border-gray-500 disabled:opacity-50"/>
-                        <label htmlFor="ai-inspiration" className={`text-sm font-medium ${!selectedPlaylistId ? 'text-gray-500' : 'text-gray-300'}`}>Use current playlist for inspiration</label>
                     </div>
                 </div>
                  <button 
