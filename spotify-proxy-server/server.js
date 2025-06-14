@@ -20,7 +20,7 @@ app.get('/wqxr-playlist', async (req, res) => {
     return res.status(400).json({ error: 'Missing required date parameters (year, month, day).' });
   }
 
-  const url = 'https://wqxr-legacy.prod.nypr.digital/playlist-daily/2025/jun/12/?scheduleStation=q2';
+  const url = `https://wqxr-legacy.prod.nypr.digital/playlist-daily/${year}/${month}/${day}/?scheduleStation=q2`;
 //  console.log(url);
   try {
     // Use axios to fetch the HTML content from the WQXR playlist page
@@ -37,7 +37,7 @@ app.get('/wqxr-playlist', async (req, res) => {
       // For each song, find the title and the composer
       // **FIX**: Use .text() and .trim() to extract the string content from the HTML elements
       const title = $(element).find('.playlist-item__title').text().trim();
-      const composer = $(element).find('.playlist-item__musicians').text().trim();
+      const composer = $(element).find('.piece-info').find('ul').children('li').find('a').last().text().trim()
 
       if (title && composer) {
         tracks.push({ title, composer });
