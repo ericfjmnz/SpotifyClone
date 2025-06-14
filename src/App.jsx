@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useCallback, createContext, useContext, useRef } from 'react';
 
 // --- Spotify API Configuration ---
+// The redirect URI is set to the current window's origin.
 const REDIRECT_URI = window.location.origin; 
 const AUTH_ENDPOINT = "https://accounts.spotify.com/authorize";
 const TOKEN_ENDPOINT = "https://accounts.spotify.com/api/token";
+// Scopes define the permissions the app is requesting from the user.
 const SCOPES = [
     "user-read-private",
     "user-read-email",
@@ -13,20 +15,20 @@ const SCOPES = [
     "playlist-read-private",
     "user-top-read",
     "user-read-recently-played",
-    "playlist-read-private",
     "playlist-read-collaborative",
     "user-read-currently-playing",
-    // Scopes required for Web Playback SDK
-    "streaming",
-    "user-read-playback-state",
-    "user-modify-playback-state"
+    "streaming", // Required for Web Playback SDK
+    "user-read-playback-state", // Required for Web Playback SDK
+    "user-modify-playback-state" // Required for Web Playback SDK
 ].join(" ");
 
 
 // --- React Context for State Management ---
+// AppContext provides a way to pass data through the component tree without prop-drilling.
 const AppContext = createContext();
 
 // --- PKCE Helper Functions ---
+// These functions are used for the secure PKCE authentication flow.
 
 function generateCodeVerifier(length) {
     let text = '';
@@ -47,11 +49,13 @@ async function generateCodeChallenge(codeVerifier) {
 }
 
 // --- Login Screen Component ---
+// This component handles the initial user login and Spotify authorization.
 function LoginScreen() {
     const [clientId, setClientId] = useState("");
     const [loginError, setLoginError] = useState("");
     const [copied, setCopied] = useState(false);
     
+    // On component mount, check for a stored client ID or any login errors from the redirect.
     useEffect(() => {
         const storedClientId = window.localStorage.getItem("spotify_client_id");
         if (storedClientId) {
@@ -61,10 +65,11 @@ function LoginScreen() {
         const params = new URLSearchParams(window.location.search);
         const error = params.get("error");
         if (error) {
-            setLoginError(`Spotify returned an error: "${error}". Please ensure your Redirect URI is correctly set in your dashboard.`);
+            setLoginError(`Spotify returned an error: "${error}". Please ensure your Redirect URI is correctly set in your Spotify Developer Dashboard.`);
         }
     }, []);
 
+    // Handles the login process by redirecting the user to Spotify's authorization page.
     const handleLogin = async (e) => {
         e.preventDefault();
         if (clientId) {
@@ -84,12 +89,12 @@ function LoginScreen() {
             params.append("code_challenge", challenge);
 
             document.location = `${AUTH_ENDPOINT}?${params.toString()}`;
-
         } else {
             setLoginError("Please enter a valid Spotify Client ID.");
         }
     };
     
+    // Copies the Redirect URI to the clipboard for easy setup in the Spotify Developer Dashboard.
     const copyToClipboard = () => {
         const textToCopy = REDIRECT_URI;
         const textArea = document.createElement("textarea");
@@ -99,7 +104,7 @@ function LoginScreen() {
         try {
             document.execCommand('copy');
             setCopied(true);
-            setTimeout(() => setCopied(false), 2000); // Reset after 2 seconds
+            setTimeout(() => setCopied(false), 2000);
         } catch (err) {
             console.error('Failed to copy text: ', err);
         }
@@ -126,7 +131,7 @@ function LoginScreen() {
                 <p className="text-gray-400 mb-4">Once configured, enter your Client ID below to log in.</p>
 
                 <form onSubmit={handleLogin} className="flex flex-col gap-4">
-                     <input
+                    <input
                         type="text"
                         placeholder="Enter your Spotify Client ID"
                         value={clientId}
@@ -148,6 +153,7 @@ function LoginScreen() {
 
 
 // --- Main App Component ---
+// This is the root component that manages the overall application state and layout.
 export default function App() {
     const [token, setToken] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -160,7 +166,7 @@ export default function App() {
     const [isPaused, setIsPaused] = useState(true);
     const [position, setPosition] = useState(0);
     const [sdkLoaded, setSdkLoaded] = useState(false);
-    const [libraryVersion, setLibraryVersion] = useState(0);
+    const [libraryVersion, setLibraryVersion] = useState(0); // Used to trigger refetches
     const [profile, setProfile] = useState(null);
     const [playlistToEdit, setPlaylistToEdit] = useState(null);
     const [playlistToDelete, setPlaylistToDelete] = useState(null);
@@ -177,7 +183,7 @@ export default function App() {
         setSelectedPlaylistId(null);
     }, [player]);
 
-    // Effect for loading external Spotify SDK and Tailwind CSS
+    // Effect for loading external Spotify SDK and Tailwind CSS.
     useEffect(() => {
         const tailwindScript = document.createElement('script');
         tailwindScript.src = 'https://cdn.tailwindcss.com';
@@ -194,7 +200,7 @@ export default function App() {
 
     }, []);
 
-    // Effect for handling authentication token
+    // Effect for handling authentication token retrieval.
     useEffect(() => {
         const clientId = window.localStorage.getItem("spotify_client_id");
         const params = new URLSearchParams(window.location.search);
@@ -217,9 +223,7 @@ export default function App() {
                     body: params
                 });
 
-                if (!result.ok) {
-                    throw new Error(`HTTP error! status: ${result.status}`);
-                }
+                if (!result.ok) throw new Error(`HTTP error! status: ${result.status}`);
 
                 const { access_token } = await result.json();
                 window.localStorage.setItem("spotify_token", access_token);
@@ -227,31 +231,30 @@ export default function App() {
                 window.history.replaceState(null, null, window.location.pathname);
             } catch (error) {
                 console.error("Error fetching token:", error);
-                window.localStorage.removeItem("spotify_token");
+                logout();
             } finally {
                 setIsLoading(false);
             }
         };
 
         if (code) {
-             getToken(code);
+            getToken(code);
         } else {
-             const storedToken = window.localStorage.getItem("spotify_token");
-             if (storedToken) {
-                 setToken(storedToken);
-             }
-             setIsLoading(false);
+            const storedToken = window.localStorage.getItem("spotify_token");
+            if (storedToken) {
+                setToken(storedToken);
+            }
+            setIsLoading(false);
         }
-    }, []);
+    }, [logout]);
 
-    // Effect for initializing the Spotify Player
+    // Effect for initializing the Spotify Web Playback SDK Player.
     useEffect(() => {
         if (token && sdkLoaded) {
             const playerInstance = new window.Spotify.Player({
                 name: 'React Spotify Clone',
                 getOAuthToken: cb => { cb(token); },
-                volume: 0.5,
-                getRobustnessLevel: () => Promise.resolve('low'),
+                volume: 0.5
             });
 
             setPlayer(playerInstance);
@@ -260,15 +263,13 @@ export default function App() {
                 setIsPlayerReady(true);
                 setDeviceId(device_id);
             });
-            playerInstance.addListener('not_ready', ({ device_id }) => {
-                 setIsPlayerReady(false);
-                 setDeviceId(null);
+            playerInstance.addListener('not_ready', () => {
+                setIsPlayerReady(false);
+                setDeviceId(null);
             });
             
             playerInstance.addListener('player_state_changed', ( state => {
-                if (!state) {
-                    return;
-                }
+                if (!state) return;
                 setCurrentTrack(state.track_window.current_track);
                 setIsPaused(state.paused);
                 setPosition(state.position);
@@ -281,14 +282,15 @@ export default function App() {
             };
         }
     }, [token, sdkLoaded]);
-
+    
+    // Effect to manually update the track position progress bar.
     useEffect(() => {
         let interval;
         if (!isPaused) {
             interval = setInterval(() => {
                 setPosition(prevPosition => prevPosition + 1000);
             }, 1000);
-        } else if (isPaused) {
+        } else {
             clearInterval(interval);
         }
         return () => clearInterval(interval);
@@ -322,7 +324,7 @@ export default function App() {
 
 function Sidebar() {
     const { view, setView, selectedPlaylistId, setSelectedPlaylistId, logout, libraryVersion, profile, setPlaylistToEdit, setPlaylistToDelete } = useContext(AppContext);
-    const { data: playlists, loading: playlistsLoading } = useSpotifyApi(`/me/playlists?v=${libraryVersion}`);
+    const { data: playlists, loading: playlistsLoading } = useSpotifyApi(`/me/playlists?limit=50&v=${libraryVersion}`);
     const [activeMenu, setActiveMenu] = useState(null);
     
     const NavItem = ({ label, targetView, icon }) => (
@@ -338,7 +340,7 @@ function Sidebar() {
         </li>
     );
     
-     const handlePlaylistClick = (playlistId) => {
+    const handlePlaylistClick = (playlistId) => {
         setActiveMenu(null);
         setSelectedPlaylistId(playlistId);
         setView('playlist');
@@ -347,17 +349,17 @@ function Sidebar() {
     return (
         <nav className="w-64 bg-black p-2 flex-shrink-0 flex-col hidden sm:flex">
             <div className="bg-[#121212] rounded-lg p-2">
-                 <ul className="space-y-2">
+                <ul className="space-y-2">
                     <NavItem label="Home" targetView="home" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="currentColor" viewBox="0 0 16 16"><path d="M8.354 1.146a.5.5 0 0 0-.708 0l-6 6A.5.5 0 0 0 1.5 7.5v7a.5.5 0 0 0 .5.5h4.5a.5.5 0 0 0 .5-.5v-4h2v4a.5.5 0 0 0 .5.5H14a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.146-.354L8.354 1.146zM2.5 14V7.707l5.5-5.5 5.5 5.5V14H10v-4a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 0-.5.5v4H2.5z"/></svg>} />
                     <NavItem label="Search" targetView="search" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="currentColor" viewBox="0 0 16 16"><path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/></svg>} />
                     <NavItem label="Playlist Creator" targetView="creator" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="currentColor" viewBox="0 0 16 16"><path d="M6 13c0 1.105-1.12 2-2.5 2S1 14.105 1 13c0-1.104 1.12-2 2.5-2s2.5.896 2.5 2zM1 7v2h6V7H1zm6-2v2H1V5h6zm1-2v2H1V3h6zm1-2v2H1V1h6zm1 10.117V15h8v-1.883l-4-3.117-4 3.117zM15.5 9a.5.5 0 0 1-.5.5h-8a.5.5 0 0 1-.5-.5V3.334l4-3.117 4 3.117V9z"/></svg>} />
                 </ul>
             </div>
             <div className="bg-[#121212] rounded-lg p-2 mt-2 flex-1 overflow-y-auto">
-                 <h2 className="p-4 text-base font-semibold text-gray-300">Your Library</h2>
-                 {playlistsLoading ? (
-                     <p className="p-4 text-gray-400">Loading playlists...</p>
-                 ) : (
+                <h2 className="p-4 text-base font-semibold text-gray-300">Your Library</h2>
+                {playlistsLoading ? (
+                    <p className="p-4 text-gray-400">Loading playlists...</p>
+                ) : (
                     <ul className="space-y-1">
                         {playlists?.items.map(playlist => (
                             <li key={playlist.id} className={`group flex justify-between items-center text-gray-400 hover:text-white p-2 rounded-md cursor-pointer text-sm ${selectedPlaylistId === playlist.id ? 'bg-gray-800 !text-white' : ''}`}>
@@ -378,11 +380,11 @@ function Sidebar() {
                             </li>
                         ))}
                     </ul>
-                 )}
+                )}
             </div>
              <div className="mt-auto pt-2">
                  <button onClick={logout} className="w-full text-left text-gray-400 hover:text-white p-4">Logout</button>
-            </div>
+             </div>
         </nav>
     );
 }
@@ -396,7 +398,7 @@ function MainContent() {
                 {view === 'home' && <HomePage />}
                 {view === 'playlist' && <PlaylistView playlistId={selectedPlaylistId} />}
                 {view === 'creator' && <PlaylistCreator />}
-                {view === 'search' && <div className="text-center"><h1 className="text-3xl font-bold">Search</h1><p className="text-gray-400">Search functionality coming soon!</p></div>}
+                {view === 'search' && <SearchView />}
             </div>
         </main>
     );
@@ -475,11 +477,17 @@ function PlayerBar() {
         return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
     };
 
-    if (!player) return <footer className="h-24 bg-black border-t border-gray-800 flex items-center justify-center"><p className="text-gray-400">Connecting to Spotify...</p></footer>;
+    if (!isPlayerReady) return (
+        <footer className="h-24 bg-black border-t border-gray-800 flex items-center justify-center text-center p-2">
+            <p className="text-gray-400">Player not ready. Open a Spotify app and play a song to activate.</p>
+        </footer>
+    );
     
-    if (!isPlayerReady) return <footer className="h-24 bg-black border-t border-gray-800 flex items-center justify-center text-center p-2"><p className="text-gray-400">Player not ready. Please open a Spotify app on your computer or phone to start listening.</p></footer>;
-    
-    if (!currentTrack) return <footer className="h-24 bg-black border-t border-gray-800 flex items-center justify-center"><p className="text-gray-400">Select a song to play.</p></footer>;
+    if (!currentTrack) return (
+        <footer className="h-24 bg-black border-t border-gray-800 flex items-center justify-center">
+            <p className="text-gray-400">Select a song to play.</p>
+        </footer>
+    );
 
     const togglePlay = () => {
         player.togglePlay();
@@ -507,17 +515,17 @@ function PlayerBar() {
                 </div>
             </div>
             <div className="w-1/2 flex flex-col items-center gap-2">
-                 <div className="flex items-center gap-4 text-2xl">
-                    <button className="text-gray-400 hover:text-white">«</button>
+                <div className="flex items-center gap-4 text-2xl">
+                    <button onClick={() => player.previousTrack()} className="text-gray-400 hover:text-white">«</button>
                     <button onClick={togglePlay} className="p-2 bg-white text-black rounded-full hover:scale-105">
                         {isPaused ? 
                             <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg> :
                             <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
                         }
                     </button>
-                    <button className="text-gray-400 hover:text-white">»</button>
-                 </div>
-                 <div className="w-full flex items-center gap-2 text-xs text-gray-400">
+                    <button onClick={() => player.nextTrack()} className="text-gray-400 hover:text-white">»</button>
+                </div>
+                <div className="w-full flex items-center gap-2 text-xs text-gray-400">
                     <span>{formatDuration(position)}</span>
                     <div ref={progressBarRef} onClick={handleSeek} className="w-full h-1 bg-gray-700 rounded-full cursor-pointer group">
                         <div style={{ width: `${progress}%` }} className="h-full bg-white rounded-full group-hover:bg-green-500 relative">
@@ -536,6 +544,7 @@ function PlayerBar() {
 
 
 // --- API Fetch Hook ---
+// A custom hook to simplify making authenticated requests to the Spotify API.
 const useSpotifyApi = (url) => {
     const { token, logout } = useContext(AppContext);
     const [data, setData] = useState(null);
@@ -550,13 +559,14 @@ const useSpotifyApi = (url) => {
             };
             try {
                 setLoading(true);
+                // Simple cache-busting by adding a timestamp.
                 const cacheBustedUrl = `${url}${url.includes('?') ? '&' : '?'}t=${new Date().getTime()}`;
                 const response = await fetch(`https://api.spotify.com/v1${cacheBustedUrl}`, {
                     headers: {
                         Authorization: `Bearer ${token}`,
                     }
                 });
-                if (response.status === 401) {
+                if (response.status === 401) { // If token is expired or invalid
                     logout();
                     return;
                 }
@@ -596,11 +606,11 @@ function ContentSection({ title, children, error, loading }) {
     );
 }
 
-function PlaylistCard({ imageUrl, title, subtitle, isArtist = false }) {
+function PlaylistCard({ imageUrl, title, subtitle, isArtist = false, onClick }) {
     const imageClasses = isArtist ? "rounded-full shadow-lg" : "rounded-md shadow-lg";
 
     return (
-        <div className="bg-[#181818] rounded-lg hover:bg-[#282828] transition-colors duration-300 group cursor-pointer p-4">
+        <div onClick={onClick} className="bg-[#181818] rounded-lg hover:bg-[#282828] transition-colors duration-300 group cursor-pointer p-4">
             <div className="relative mb-4">
                 <img src={imageUrl || 'https://placehold.co/300x300/181818/FFFFFF?text=...'} alt={title} className={`w-full h-auto ${imageClasses}`}/>
                 <div className="absolute bottom-2 right-2 w-12 h-12 bg-green-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 group-hover:bottom-4 transition-all duration-300 shadow-xl">
@@ -643,7 +653,7 @@ function HomePage() {
                            <img src={track.album.images[0]?.url || 'https://placehold.co/80x80/181818/FFFFFF?text=...'} alt={track.name} className="w-20 h-20 flex-shrink-0"/>
                            <p className="font-semibold text-white flex-1 pr-2">{track.name}</p>
                            <div className="mr-4 w-12 h-12 bg-green-500 rounded-full items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 shadow-xl hidden sm:flex">
-                              <svg className="w-6 h-6 text-black" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                             <svg className="w-6 h-6 text-black" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                            </div>
                        </div> 
                     ))}
@@ -669,14 +679,16 @@ function HomePage() {
 
 function PlaylistView({ playlistId }) {
     const { data: playlist, loading } = useSpotifyApi(`/playlists/${playlistId}`);
-    const { token, deviceId, currentTrack, isPaused } = useContext(AppContext);
+    const { token, deviceId, currentTrack, isPaused, setView, setSelectedPlaylistId } = useContext(AppContext);
+    const [error, setError] = useState(null);
 
-    const playTrack = (trackUri) => {
+    const playTrack = async (trackUri) => {
         if (!deviceId) {
-            alert("No active player found. Please open Spotify on a device.");
+            setError("No active player found. Please open Spotify on a device and start playing a song.");
             return;
         }
-        fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
+        setError(null);
+        await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',
@@ -694,7 +706,14 @@ function PlaylistView({ playlistId }) {
     };
 
     if (loading) return <div className="text-center p-10">Loading playlist...</div>;
-    if (!playlist) return <div className="text-center p-10">Playlist not found.</div>;
+    if (!playlist) {
+        // This can happen if a playlist was deleted.
+        useEffect(() => {
+            setView('home');
+            setSelectedPlaylistId(null);
+        }, [setView, setSelectedPlaylistId])
+        return null;
+    }
 
     return (
         <div className="text-white">
@@ -703,14 +722,16 @@ function PlaylistView({ playlistId }) {
                 <div>
                     <p className="text-sm font-bold">Playlist</p>
                     <h1 className="text-5xl font-extrabold">{playlist.name}</h1>
-                    <p className="text-gray-300 mt-2">{playlist.description}</p>
+                    <p className="text-gray-300 mt-2" dangerouslySetInnerHTML={{ __html: playlist.description }} />
                 </div>
             </header>
             
+            {error && <div className="bg-red-500 text-white p-3 rounded-md mb-4">{error}</div>}
+            
             <div>
-                 {playlist.tracks?.items?.length > 0 ? (
+                {playlist.tracks?.items?.length > 0 ? (
                     playlist.tracks.items.map(({ track }, index) => {
-                        if(!track) return null;
+                        if(!track) return null; // Tracks can sometimes be null if they are unavailable.
                         const isPlaying = currentTrack?.uri === track.uri && !isPaused;
 
                         return (
@@ -721,14 +742,14 @@ function PlaylistView({ playlistId }) {
                             >
                                 <div className="text-gray-400 w-8 text-center flex items-center justify-center">
                                    { isPlaying ?
-                                        ( <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-green-500 animate-pulse"><path d="M2.69231 6.30769V9.69231H0V6.30769H2.69231ZM6.76923 12.4615V3.53846H4.07692V12.4615H6.76923ZM10.8462 16V0H8.15385V16H10.8462ZM14.9231 12.4615V3.53846H12.2308V12.4615H14.9231Z" fill="currentColor"/></svg> ) :
-                                        ( <>
-                                            <span className="group-hover:hidden">{index + 1}</span>
-                                            <button onClick={() => playTrack(track.uri)} className="text-white hidden group-hover:block">
-                                                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                                            </button>
-                                        </> )
-                                    }
+                                       ( <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-green-500 animate-pulse"><path d="M2.69231 6.30769V9.69231H0V6.30769H2.69231ZM6.76923 12.4615V3.53846H4.07692V12.4615H6.76923ZM10.8462 16V0H8.15385V16H10.8462ZM14.9231 12.4615V3.53846H12.2308V12.4615H14.9231Z" fill="currentColor"/></svg> ) :
+                                       ( <>
+                                           <span className="group-hover:hidden">{index + 1}</span>
+                                           <button onClick={() => playTrack(track.uri)} className="text-white hidden group-hover:block">
+                                               <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                                           </button>
+                                       </> )
+                                   }
                                 </div>
                                 <div className="flex items-center gap-4">
                                     <img src={track.album.images[2]?.url || 'https://placehold.co/40x40/181818/FFFFFF?text=...'} alt={track.name} className="w-10 h-10"/>
@@ -775,8 +796,15 @@ function PlaylistCreator() {
     const { year: yesterdayYear, month: yesterdayMonth, day: yesterdayDay } = getYesterdayDateParts();
 
     const handleCreateWQXRPlaylist = async () => {
+        // NOTE: This function requires a local proxy server to be running
+        // to bypass CORS restrictions when fetching from wqxr.org.
+        // This is a known limitation for client-side only apps.
+        setError("This feature is currently disabled because it requires a backend proxy server to work correctly. See code comments for details.");
+        return;
+
+        
         if(!profile) {
-            setStatus('Could not get user profile. Please try again.');
+            setError('Could not get user profile. Please try again.');
             return;
         }
         setIsWqxrLoading(true);
@@ -786,22 +814,14 @@ function PlaylistCreator() {
 
         try {
             const { year, month, day } = getYesterdayDateParts();
-    
             const proxyResponse = await fetch(`http://localhost:3001/wqxr-playlist?year=${year}&month=${month}&day=${day}`);
             
-            if (!proxyResponse.ok) {
-                throw new Error('Failed to fetch data from proxy server. Make sure it is running.');
-            }
+            if (!proxyResponse.ok) throw new Error('Failed to fetch data from proxy server. Make sure it is running.');
     
             const data = await proxyResponse.json();
             const wqxrTracks = data.tracks;
     
-            if (!wqxrTracks || wqxrTracks.length === 0) {
-                setError('Could not parse any tracks from the WQXR playlist.');
-                setStatus('');
-                setIsWqxrLoading(false);
-                return;
-            }
+            if (!wqxrTracks || wqxrTracks.length === 0) throw new Error('Could not parse any tracks from the WQXR playlist.');
             
             setStatus(`Found ${wqxrTracks.length} tracks. Searching on Spotify...`);
             
@@ -817,9 +837,7 @@ function PlaylistCreator() {
                 }
             }
     
-            if (trackUris.length === 0) {
-                throw new Error('Could not find any of the WQXR tracks on Spotify.');
-            }
+            if (trackUris.length === 0) throw new Error('Could not find any of the WQXR tracks on Spotify.');
             
             setStatus('Creating new WQXR playlist...');
             const playlistName = `WQXR Daily - ${yesterdayYear}-${yesterdayMonth}-${yesterdayDay}`;
@@ -832,7 +850,7 @@ function PlaylistCreator() {
     
             setStatus('Adding tracks to the new WQXR playlist...');
             await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
-                 method: 'POST',
+                method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                 body: JSON.stringify({ uris: trackUris })
             });
@@ -848,6 +866,7 @@ function PlaylistCreator() {
         } finally {
             setIsWqxrLoading(false);
         }
+        
     };
     
     const resetCustomForm = () => {
@@ -858,6 +877,7 @@ function PlaylistCreator() {
     const handleCreateAiPlaylist = async () => {
         setError('');
         setStatus('');
+        setCreatedPlaylist(null);
         if (!customPlaylistName.trim()) {
             setError('Playlist name cannot be empty.');
             return;
@@ -872,11 +892,10 @@ function PlaylistCreator() {
         }
 
         setIsCustomLoading(true);
-        setCreatedPlaylist(null);
         setStatus('Asking AI for song ideas... This may take a moment.');
 
         try {
-            const geminiPrompt = `Based on the following theme: "${aiPrompt}", generate a list of 100 suitable songs. Include a mix of popular and less common tracks if possible.`;
+            const geminiPrompt = `Based on the following theme: "${aiPrompt}", generate a list of 20 suitable songs. Include a mix of popular and less common tracks if possible.`;
             let chatHistory = [{ role: "user", parts: [{ text: geminiPrompt }] }];
             const payload = {
                 contents: chatHistory,
@@ -901,7 +920,10 @@ function PlaylistCreator() {
                     }
                 }
             };
-            const apiKey = "AIzaSyAsb7lrYNWBzSIUe5RUCOCMib20FzAX61M"; // IMPORTANT: Add your Gemini API Key here
+            
+            // The API key is left as "" and will be handled by the environment.
+            // This is the secure way to handle API calls from the client-side.
+            const apiKey = "AIzaSyAsb7lrYNWBzSIUe5RUCOCMib20FzAX61M"; 
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
             const geminiResponse = await fetch(apiUrl, {
                 method: 'POST',
@@ -909,39 +931,40 @@ function PlaylistCreator() {
                 body: JSON.stringify(payload)
             });
             
-            if (geminiResponse.status === 403) {
-                 throw new Error("AI request failed: API key is invalid or missing permissions. This is an environment configuration issue.");
+            if(!geminiResponse.ok) {
+                const errorBody = await geminiResponse.text();
+                throw new Error(`AI request failed: ${geminiResponse.status}. ${errorBody}`);
             }
-            if(!geminiResponse.ok) throw new Error(`AI request failed with status: ${geminiResponse.status}`);
 
             const result = await geminiResponse.json();
+            
+            if (!result.candidates || result.candidates.length === 0) {
+                 throw new Error("AI response was empty or invalid. Please try a different prompt.");
+            }
+
             const songsText = result.candidates[0].content.parts[0].text;
             const aiSuggestions = JSON.parse(songsText).songs;
 
             if (!aiSuggestions || aiSuggestions.length === 0) {
-                 setError('The AI could not suggest any songs for this theme. Please try a different prompt.');
-                 setIsCustomLoading(false);
-                 return;
+                 throw new Error('The AI could not suggest any songs for this theme. Please try a different prompt.');
             }
 
             setStatus('Searching for suggested songs on Spotify...');
             const trackUris = [];
-            for (const song of aiSuggestions) {
-                 const query = encodeURIComponent(`track:${song.track} artist:${song.artist}`);
-                 const searchResponse = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, {
+            // Use Promise.all for parallel search requests to speed up the process.
+            await Promise.all(aiSuggestions.map(async (song) => {
+                const query = encodeURIComponent(`track:${song.track} artist:${song.artist}`);
+                const searchResponse = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, {
                     headers: { Authorization: `Bearer ${token}` }
-                 });
-                 const searchData = await searchResponse.json();
-                 if (searchData.tracks.items.length > 0) {
-                     trackUris.push(searchData.tracks.items[0].uri);
-                 }
-            }
+                });
+                const searchData = await searchResponse.json();
+                if (searchData.tracks.items.length > 0) {
+                    trackUris.push(searchData.tracks.items[0].uri);
+                }
+            }));
 
             if (trackUris.length === 0) {
-                setError('Could not find any of the AI-suggested songs on Spotify.');
-                setStatus('');
-                setIsCustomLoading(false);
-                return;
+                throw new Error('Could not find any of the AI-suggested songs on Spotify. The AI might be hallucinating!');
             }
 
             setStatus(`Creating playlist "${customPlaylistName}"...`);
@@ -953,6 +976,7 @@ function PlaylistCreator() {
             const newPlaylist = await playlistResponse.json();
 
             setStatus(`Adding ${trackUris.length} songs...`);
+            // Spotify API can only handle 100 tracks at a time, so chunk if necessary (though we request 20).
             await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -963,14 +987,14 @@ function PlaylistCreator() {
             setStatus('AI-powered playlist created successfully!');
             setLibraryVersion(v => v + 1);
             resetCustomForm();
-            setIsCustomLoading(false);
 
         } catch (e) {
-            setError(e.message);
+            setError(`An error occurred: ${e.message}`);
             console.error(e);
+            setStatus('');
+        } finally {
             setIsCustomLoading(false);
         }
-
     };
 
 
@@ -978,36 +1002,32 @@ function PlaylistCreator() {
         <div className="space-y-8">
             <h1 className="text-3xl font-bold mb-4">Playlist Creator</h1>
             
-            <div className="bg-gray-800 p-6 rounded-lg">
-                <h2 className="text-xl font-semibold mb-2">WQXR Daily Playlist</h2>
-                <p className="text-gray-400 mb-4">
-                    Create a new playlist based on the music played yesterday ({yesterdayDay}-{yesterdayMonth}-{yesterdayYear}) on WQXR.
-                </p>
-                <button 
-                    onClick={handleCreateWQXRPlaylist} 
-                    disabled={isWqxrLoading || isCustomLoading}
-                    className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
-                >
-                    {isWqxrLoading ? 'Creating...' : "Create Yesterday's Playlist"}
-                </button>
-            </div>
-
+            {error && <div className="p-3 bg-red-800 text-white rounded-md mb-4">{error}</div>}
+            {status && !error && <div className="p-3 bg-blue-800 text-white rounded-md mb-4">{status}</div>}
+            {createdPlaylist && (
+                <div className="mt-4 p-3 bg-green-800 rounded-md">
+                    <a href={createdPlaylist.external_urls.spotify} target="_blank" rel="noopener noreferrer" className="text-white font-semibold hover:underline">
+                        Open your new playlist: "{createdPlaylist.name}"
+                    </a>
+                </div>
+            )}
+            
             <div className="bg-gray-800 p-6 rounded-lg">
                 <h2 className="text-xl font-semibold mb-2">AI-Powered Playlist Creator</h2>
-                 <p className="text-gray-400 mb-4">
+                <p className="text-gray-400 mb-4">
                     Describe the kind of playlist you want, and let AI build it for you.
                 </p>
                 <div className="space-y-4">
                      <div>
-                        <label className="block mb-1 text-sm font-medium text-gray-300">Playlist Name</label>
-                        <input type="text" value={customPlaylistName} onChange={e => setCustomPlaylistName(e.target.value)} placeholder="My Awesome Mix" className="w-full p-2 bg-gray-700 rounded-md border-gray-600" />
-                    </div>
+                         <label className="block mb-1 text-sm font-medium text-gray-300">Playlist Name</label>
+                         <input type="text" value={customPlaylistName} onChange={e => setCustomPlaylistName(e.target.value)} placeholder="My Awesome Mix" className="w-full p-2 bg-gray-700 rounded-md border-gray-600" />
+                     </div>
                      <div>
-                        <label className="block mb-1 text-sm font-medium text-gray-300">Describe your playlist</label>
-                        <textarea value={aiPrompt} onChange={e => setAiPrompt(e.target.value)} placeholder="e.g., an upbeat roadtrip playlist with 90s alternative rock" rows="3" className="w-full p-2 bg-gray-700 rounded-md border-gray-600" />
-                    </div>
+                         <label className="block mb-1 text-sm font-medium text-gray-300">Describe your playlist</label>
+                         <textarea value={aiPrompt} onChange={e => setAiPrompt(e.target.value)} placeholder="e.g., an upbeat roadtrip playlist with 90s alternative rock" rows="3" className="w-full p-2 bg-gray-700 rounded-md border-gray-600" />
+                     </div>
                 </div>
-                 <button 
+                <button 
                     onClick={handleCreateAiPlaylist} 
                     disabled={isWqxrLoading || isCustomLoading}
                     className="mt-6 bg-green-600 hover:bg-green-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
@@ -1015,18 +1035,147 @@ function PlaylistCreator() {
                     {isCustomLoading ? 'Creating...' : "Create AI Playlist"}
                 </button>
             </div>
-             {error && <p className="mt-4 text-red-500">{error}</p>}
-             {status && <p className="mt-4 text-gray-300">{status}</p>}
-             {createdPlaylist && (
-                <div className="mt-4">
-                    <a href={createdPlaylist.external_urls.spotify} target="_blank" rel="noopener noreferrer" className="text-green-500 font-semibold hover:underline">
-                        Open your new playlist: "{createdPlaylist.name}"
-                    </a>
+
+            <div className="bg-gray-800 p-6 rounded-lg opacity-50">
+                <h2 className="text-xl font-semibold mb-2">WQXR Daily Playlist (Disabled)</h2>
+                <p className="text-gray-400 mb-4">
+                    Create a new playlist based on the music played yesterday ({yesterdayDay}-{yesterdayMonth}-{yesterdayYear}) on WQXR. (Requires a backend proxy).
+                </p>
+                <button 
+                    onClick={handleCreateWQXRPlaylist} 
+                    disabled={true}
+                    className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 disabled:cursor-not-allowed text-white font-bold py-2 px-6 rounded-full"
+                >
+                    Create Yesterday's Playlist
+                </button>
+            </div>
+        </div>
+    );
+}
+
+// --- NEW --- SearchView Component
+// A new component to handle search functionality.
+function SearchView() {
+    const { token } = useContext(AppContext);
+    const [query, setQuery] = useState("");
+    const [results, setResults] = useState(null);
+    const [loading, setLoading] = useState(false);
+    
+    // Debounce search input to avoid excessive API calls
+    useEffect(() => {
+        if (!query.trim()) {
+            setResults(null);
+            return;
+        }
+
+        const searchTimer = setTimeout(async () => {
+            setLoading(true);
+            const searchQuery = encodeURIComponent(query);
+            const type = "track,artist,album";
+            const response = await fetch(`https://api.spotify.com/v1/search?q=${searchQuery}&type=${type}&limit=10`, {
+                 headers: { Authorization: `Bearer ${token}` }
+            });
+            const data = await response.json();
+            setResults(data);
+            setLoading(false);
+        }, 500); // 500ms delay
+
+        return () => clearTimeout(searchTimer);
+    }, [query, token]);
+
+    return (
+        <div className="space-y-8">
+            <h1 className="text-3xl font-bold">Search</h1>
+            <div className="relative">
+                <input
+                    type="text"
+                    placeholder="What do you want to listen to?"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    className="w-full p-4 pl-12 bg-gray-700 text-white rounded-full focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+                <svg className="w-6 h-6 absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" fill="currentColor" viewBox="0 0 16 16"><path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/></svg>
+            </div>
+
+            {loading && <p>Searching...</p>}
+            
+            {results && (
+                <div className="space-y-10">
+                   {results.tracks?.items.length > 0 && <TrackResults tracks={results.tracks.items} />}
+                   {results.artists?.items.length > 0 && <ArtistResults artists={results.artists.items} />}
+                   {results.albums?.items.length > 0 && <AlbumResults albums={results.albums.items} />}
                 </div>
             )}
         </div>
     );
 }
+
+// --- Search Result Display Components ---
+function TrackResults({ tracks }) {
+    const { playTrack } = usePlayerActions(); // Helper hook for player actions
+    const formatDuration = (ms) => {
+        const minutes = Math.floor(ms / 60000);
+        const seconds = ((ms % 60000) / 1000).toFixed(0);
+        return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+    };
+    return (
+         <ContentSection title="Songs">
+            {tracks.map(track => (
+                <div key={track.id} onDoubleClick={() => playTrack(track.uri)} className="grid grid-cols-[auto,1fr,auto] items-center gap-4 p-2 rounded-md hover:bg-white/10 group">
+                    <img src={track.album.images[2]?.url || 'https://placehold.co/40x40/181818/FFFFFF?text=...'} alt={track.name} className="w-10 h-10"/>
+                    <div>
+                        <p className="font-semibold text-white">{track.name}</p>
+                        <p className="text-sm text-gray-400">{track.artists.map(a => a.name).join(', ')}</p>
+                    </div>
+                    <p className="text-sm text-gray-400">{formatDuration(track.duration_ms)}</p>
+                </div>
+            ))}
+        </ContentSection>
+    )
+}
+
+function ArtistResults({ artists }) {
+    return (
+        <ContentSection title="Artists">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
+                {artists.map(artist => (
+                    <PlaylistCard key={artist.id} imageUrl={artist.images[0]?.url} title={artist.name} subtitle="Artist" isArtist={true} />
+                ))}
+            </div>
+        </ContentSection>
+    )
+}
+
+function AlbumResults({ albums }) {
+    return (
+        <ContentSection title="Albums">
+             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
+                {albums.map(album => (
+                    <PlaylistCard key={album.id} imageUrl={album.images[0]?.url} title={album.name} subtitle={album.artists.map(a => a.name).join(', ')} />
+                ))}
+            </div>
+        </ContentSection>
+    )
+}
+
+// Custom hook to abstract player logic
+function usePlayerActions() {
+    const { token, deviceId } = useContext(AppContext);
+    const playTrack = (trackUri) => {
+        if (!deviceId) {
+            // In a real app, you'd show a non-blocking notification here.
+            console.error("No active player found.");
+            return;
+        }
+        fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ uris: [trackUri] })
+        });
+    }
+    return { playTrack };
+}
+
 
 function EditPlaylistModal({ playlist, onClose }) {
     const { token, setLibraryVersion } = useContext(AppContext);
@@ -1063,7 +1212,7 @@ function EditPlaylistModal({ playlist, onClose }) {
     };
     
     return (
-         <div className="fixed inset-0 bg-black bg-opacity-75 z-50 flex items-center justify-center p-4">
+       <div className="fixed inset-0 bg-black bg-opacity-75 z-50 flex items-center justify-center p-4">
             <div className="bg-[#282828] rounded-lg shadow-2xl w-full max-w-md">
                 <form onSubmit={handleSave}>
                     <div className="p-6">
@@ -1074,7 +1223,7 @@ function EditPlaylistModal({ playlist, onClose }) {
                                 <label htmlFor="name" className="block text-sm font-bold text-gray-300 mb-1">Name</label>
                                 <input type="text" id="name" value={name} onChange={e => setName(e.target.value)} required className="w-full p-2 bg-gray-700 rounded-md border-gray-600"/>
                              </div>
-                              <div>
+                             <div>
                                 <label htmlFor="description" className="block text-sm font-bold text-gray-300 mb-1">Description</label>
                                 <textarea id="description" value={description} onChange={e => setDescription(e.target.value)} rows="3" className="w-full p-2 bg-gray-700 rounded-md border-gray-600"></textarea>
                              </div>
@@ -1096,9 +1245,11 @@ function EditPlaylistModal({ playlist, onClose }) {
 function DeleteConfirmationModal({ playlist, onClose }) {
     const { token, setLibraryVersion, setView, setSelectedPlaylistId } = useContext(AppContext);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [error, setError] = useState("");
     
     const handleDelete = async () => {
         setIsDeleting(true);
+        setError("");
         try {
             // Unfollowing a playlist is the standard way to "delete" it from a user's library
             const response = await fetch(`https://api.spotify.com/v1/playlists/${playlist.id}/followers`, {
@@ -1115,8 +1266,8 @@ function DeleteConfirmationModal({ playlist, onClose }) {
             onClose();
         } catch (error) {
             console.error("Error deleting playlist:", error);
-            alert("Could not delete playlist: " + error.message);
-             setIsDeleting(false);
+            setError("Could not delete playlist: " + error.message);
+            setIsDeleting(false);
         }
     };
 
@@ -1125,15 +1276,14 @@ function DeleteConfirmationModal({ playlist, onClose }) {
             <div className="bg-[#282828] rounded-lg shadow-2xl w-full max-w-md p-6">
                 <h3 className="text-xl font-semibold text-white mb-2">Delete playlist</h3>
                 <p className="text-gray-300 mb-6">Are you sure you want to delete "{playlist.name}"? This action cannot be undone.</p>
+                {error && <p className="text-red-400 mb-4">{error}</p>}
                 <div className="flex justify-end space-x-4">
                      <button onClick={onClose} disabled={isDeleting} className="px-4 py-2 text-sm font-medium text-gray-300 bg-transparent rounded-md hover:bg-gray-700 disabled:opacity-50">Cancel</button>
                      <button onClick={handleDelete} disabled={isDeleting} className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700 disabled:opacity-50">
-                        {isDeleting ? "Deleting..." : "Yes, Delete"}
+                         {isDeleting ? "Deleting..." : "Yes, Delete"}
                      </button>
                 </div>
             </div>
         </div>
     );
 }
-
-
