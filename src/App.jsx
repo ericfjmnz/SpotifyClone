@@ -952,7 +952,7 @@ function PlaylistCreator() {
                     }
                 }
             };
-            const apiKey = ""; // IMPORTANT: Add your Gemini API Key here
+            const apiKey = "AIzaSyAsb7lrYNWBzSIUe5RUCOCMib20FzAX61M"; // IMPORTANT: Add your Gemini API Key here
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
             const geminiResponse = await fetch(apiUrl, {
                 method: 'POST',
