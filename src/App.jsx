@@ -809,7 +809,6 @@ function PlaylistCreator() {
     const [createdPlaylist, setCreatedPlaylist] = useState(null);
     const [isWqxrLoading, setIsWqxrLoading] = useState(false);
     const [isCustomLoading, setIsCustomLoading] = useState(false);
-    const [wqxrProgress, setWqxrProgress] = useState(0);
     
     // State for Custom Playlist
     const [customPlaylistName, setCustomPlaylistName] = useState('');
@@ -834,42 +833,29 @@ function PlaylistCreator() {
         setIsWqxrLoading(true);
         setError('');
         setCreatedPlaylist(null);
-        setStatus('Requesting playlist from proxy server...');
-        setWqxrProgress(0);
+        setStatus('Starting WQXR playlist creation...');
 
         try {
-            const { year, month, day } = getYesterdayDateParts();
-    
-            const proxyResponse = await fetch(`http://localhost:3001/wqxr-playlist?year=${year}&month=${month}&day=${day}`);
+            setStatus('Simulating fetch from WQXR...');
+            const simulatedTracks = [
+                { title: 'Symphony No. 5', composer: 'Beethoven' },
+                { title: 'The Four Seasons', composer: 'Vivaldi' },
+                { title: 'Clair de Lune', composer: 'Debussy' },
+                { title: 'Eine kleine Nachtmusik', composer: 'Mozart' },
+                { title: 'Nocturne in E-flat major, Op. 9 No. 2', composer: 'Chopin'}
+            ];
             
-            if (!proxyResponse.ok) {
-                throw new Error('Failed to fetch data from proxy server. Make sure it is running.');
-            }
-    
-            const data = await proxyResponse.json();
-            const wqxrTracks = data.tracks;
-    
-            if (!wqxrTracks || wqxrTracks.length === 0) {
-                setError('Could not parse any tracks from the WQXR playlist.');
-                setStatus('');
-                setIsWqxrLoading(false);
-                return;
-            }
-            
-            const totalTracks = wqxrTracks.length;
-            setStatus(`Found ${totalTracks} tracks. Searching on Spotify...`);
-            
+            setStatus('Searching for WQXR tracks on Spotify...');
             const trackUris = [];
-            for (const [index, track] of wqxrTracks.entries()) {
+            for (const track of simulatedTracks) {
                 const query = encodeURIComponent(`track:${track.title} artist:${track.composer}`);
                 const response = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, {
                     headers: { Authorization: `Bearer ${token}` }
                 });
-                const searchData = await response.json();
-                if (searchData.tracks.items.length > 0) {
-                    trackUris.push(searchData.tracks.items[0].uri);
+                const data = await response.json();
+                if (data.tracks.items.length > 0) {
+                    trackUris.push(data.tracks.items[0].uri);
                 }
-                setWqxrProgress(((index + 1) / totalTracks) * 100);
             }
     
             if (trackUris.length === 0) {
