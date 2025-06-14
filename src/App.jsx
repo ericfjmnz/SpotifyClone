@@ -654,20 +654,20 @@ function HomePage() {
                 </div>
             </ContentSection>
             
-            // {featuredPlaylistsUrl && 
-            //     <ContentSection title={featuredPlaylistsData?.message || "Featured Playlists"} loading={playlistsLoading} error={playlistsError}>
-            //          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
-            //             {featuredPlaylistsData?.playlists.items.map(playlist => (
-            //                <PlaylistCard 
-            //                     key={playlist.id} 
-            //                     imageUrl={playlist.images[0]?.url}
-            //                     title={playlist.name}
-            //                     subtitle={playlist.description.replace(/<[^>]*>?/gm, '')}
-            //                 />
-            //             ))}
-            //          </div>
-            //     </ContentSection>
-            // }
+            {featuredPlaylistsUrl && 
+                <ContentSection title={featuredPlaylistsData?.message || "Featured Playlists"} loading={playlistsLoading} error={playlistsError}>
+                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
+                        {featuredPlaylistsData?.playlists.items.map(playlist => (
+                           <PlaylistCard 
+                                key={playlist.id} 
+                                imageUrl={playlist.images[0]?.url}
+                                title={playlist.name}
+                                subtitle={playlist.description.replace(/<[^>]*>?/gm, '')}
+                            />
+                        ))}
+                     </div>
+                </ContentSection>
+            }
 
             <ContentSection title="Your Top Artists" loading={artistsLoading} error={artistsError}>
                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
@@ -1154,6 +1154,5 @@ function DeleteConfirmationModal({ playlist, onClose }) {
         </div>
     );
 }
-
 
 
