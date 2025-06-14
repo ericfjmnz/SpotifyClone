@@ -682,7 +682,12 @@ function PlaylistView({ playlistId }) {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${token}`
             },
-            body: JSON.stringify({ uris: [trackUri] })
+            body: JSON.stringify({ 
+                context_uri: playlist.uri,
+                offset: {
+                    uri: trackUri,
+                }
+            })
         });
     };
 
@@ -1135,5 +1140,3 @@ function DeleteConfirmationModal({ playlist, onClose }) {
         </div>
     );
 }
-
-
