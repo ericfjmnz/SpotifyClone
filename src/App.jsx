@@ -778,6 +778,7 @@ function PlaylistCreator() {
     const [error, setError] = useState('');
     const [createdPlaylist, setCreatedPlaylist] = useState(null);
     const [isWqxrLoading, setIsWqxrLoading] = useState(false);
+    const [wqxrProgress, setWqxrProgress] = useState(0); // New state for progress
     const [isCustomLoading, setIsCustomLoading] = useState(false);
     
     // State for Custom Playlist
@@ -803,7 +804,8 @@ function PlaylistCreator() {
         setIsWqxrLoading(true);
         setError('');
         setCreatedPlaylist(null);
-        // setStatus('Requesting playlist from proxy server...');
+        setWqxrProgress(0);
+        setStatus('Requesting playlist from proxy server...');
 
         try {
             const { year, month, day } = getYesterdayDateParts();
@@ -820,7 +822,7 @@ function PlaylistCreator() {
             setStatus(`Found ${wqxrTracks.length} tracks from WQXR. Searching on Spotify...`);
             
             const trackUris = [];
-            for (const track of wqxrTracks) {
+            for (const [index, track] of wqxrTracks.entries()) {
                 const query = encodeURIComponent(`track:${track.title} artist:${track.composer}`);
                 const response = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, {
                     headers: { Authorization: `Bearer ${token}` }
@@ -829,6 +831,9 @@ function PlaylistCreator() {
                 if (searchData.tracks.items.length > 0) {
                     trackUris.push(searchData.tracks.items[0].uri);
                 }
+                // Update progress after each track is processed
+                const progress = ((index + 1) / wqxrTracks.length) * 100;
+                setWqxrProgress(progress);
             }
     
             if (trackUris.length === 0) throw new Error('Could not find any of the WQXR tracks on Spotify.');
@@ -859,6 +864,7 @@ function PlaylistCreator() {
             console.error(e);
         } finally {
             setIsWqxrLoading(false);
+            setWqxrProgress(0); // Reset progress on completion or error
         }
     };
     
@@ -1008,8 +1014,8 @@ function PlaylistCreator() {
              <div className="bg-gray-800 p-6 rounded-lg">
                 <h2 className="text-xl font-semibold mb-2">WQXR Daily Playlist</h2>
                 <p className="text-gray-400 mb-4">
-                {/* ({yesterdayDay}-{yesterdayMonth}-{yesterdayYear}) */}
-                    Create a new playlist based on the music played yesterday on WQXR.
+                    Create a new playlist based on the music played yesterday ({yesterdayDay}-{yesterdayMonth}-{yesterdayYear}) on WQXR.
+                    <span className="block text-xs mt-1">(Requires a local proxy server to be running)</span>
                 </p>
                 <button 
                     onClick={handleCreateWQXRPlaylist} 
@@ -1018,6 +1024,14 @@ function PlaylistCreator() {
                 >
                     {isWqxrLoading ? 'Creating...' : "Create Yesterday's Playlist"}
                 </button>
+                {isWqxrLoading && (
+                    <div className="mt-4">
+                        <div className="w-full bg-gray-600 rounded-full h-2.5">
+                            <div className="bg-blue-500 h-2.5 rounded-full" style={{ width: `${wqxrProgress}%` }}></div>
+                        </div>
+                        <p className="text-center text-sm text-gray-300 mt-1">{Math.round(wqxrProgress)}%</p>
+                    </div>
+                )}
             </div>
 
             <div className="bg-gray-800 p-6 rounded-lg">
