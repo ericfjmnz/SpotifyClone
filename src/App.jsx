@@ -695,7 +695,7 @@ function HomePage() {
                     ))}
                 </div>
             </ContentSection>
-
+            
             <ContentSection title="Your Top Artists" loading={artistsLoading} error={artistsError}>
                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
                     {topArtists?.items.map(artist => (
@@ -833,28 +833,38 @@ function PlaylistCreator() {
         setIsWqxrLoading(true);
         setError('');
         setCreatedPlaylist(null);
-        setStatus('Starting WQXR playlist creation...');
+        setStatus('Requesting playlist from proxy server...');
 
         try {
-            setStatus('Simulating fetch from WQXR...');
-            const simulatedTracks = [
-                { title: 'Symphony No. 5', composer: 'Beethoven' },
-                { title: 'The Four Seasons', composer: 'Vivaldi' },
-                { title: 'Clair de Lune', composer: 'Debussy' },
-                { title: 'Eine kleine Nachtmusik', composer: 'Mozart' },
-                { title: 'Nocturne in E-flat major, Op. 9 No. 2', composer: 'Chopin'}
-            ];
+            const { year, month, day } = getYesterdayDateParts();
+    
+            const proxyResponse = await fetch(`http://localhost:3001/wqxr-playlist?year=${year}&month=${month}&day=${day}`);
             
-            setStatus('Searching for WQXR tracks on Spotify...');
+            if (!proxyResponse.ok) {
+                throw new Error('Failed to fetch data from proxy server. Make sure it is running.');
+            }
+    
+            const data = await proxyResponse.json();
+            const wqxrTracks = data.tracks;
+    
+            if (!wqxrTracks || wqxrTracks.length === 0) {
+                setError('Could not parse any tracks from the WQXR playlist.');
+                setStatus('');
+                setIsWqxrLoading(false);
+                return;
+            }
+            
+            setStatus(`Found ${wqxrTracks.length} tracks. Searching on Spotify...`);
+            
             const trackUris = [];
-            for (const track of simulatedTracks) {
+            for (const track of wqxrTracks) {
                 const query = encodeURIComponent(`track:${track.title} artist:${track.composer}`);
                 const response = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, {
                     headers: { Authorization: `Bearer ${token}` }
                 });
-                const data = await response.json();
-                if (data.tracks.items.length > 0) {
-                    trackUris.push(data.tracks.items[0].uri);
+                const searchData = await response.json();
+                if (searchData.tracks.items.length > 0) {
+                    trackUris.push(searchData.tracks.items[0].uri);
                 }
             }
     
@@ -942,7 +952,7 @@ function PlaylistCreator() {
                     }
                 }
             };
-            const apiKey = ""; // IMPORTANT: Add your Gemini API Key here
+            const apiKey = "AIzaSyAsb7lrYNWBzSIUe5RUCOCMib20FzAX61M"; // IMPORTANT: Add your Gemini API Key here
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
             const geminiResponse = await fetch(apiUrl, {
                 method: 'POST',
@@ -1176,3 +1186,4 @@ function DeleteConfirmationModal({ playlist, onClose }) {
         </div>
     );
 }
+
