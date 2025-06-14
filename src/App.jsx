@@ -803,7 +803,7 @@ function PlaylistCreator() {
         setIsWqxrLoading(true);
         setError('');
         setCreatedPlaylist(null);
-        setStatus('Requesting playlist from proxy server...');
+        // setStatus('Requesting playlist from proxy server...');
 
         try {
             const { year, month, day } = getYesterdayDateParts();
@@ -817,7 +817,7 @@ function PlaylistCreator() {
     
             if (!wqxrTracks || wqxrTracks.length === 0) throw new Error('Could not parse any tracks from the WQXR playlist.');
             
-            setStatus(`Found ${wqxrTracks.length} tracks. Searching on Spotify...`);
+            setStatus(`Found ${wqxrTracks.length} tracks from WQXR. Searching on Spotify...`);
             
             const trackUris = [];
             for (const track of wqxrTracks) {
@@ -1008,8 +1008,8 @@ function PlaylistCreator() {
              <div className="bg-gray-800 p-6 rounded-lg">
                 <h2 className="text-xl font-semibold mb-2">WQXR Daily Playlist</h2>
                 <p className="text-gray-400 mb-4">
-                    Create a new playlist based on the music played yesterday ({yesterdayDay}-{yesterdayMonth}-{yesterdayYear}) on WQXR.
-                    <span className="block text-xs mt-1">(Requires a local proxy server to be running)</span>
+                {/* ({yesterdayDay}-{yesterdayMonth}-{yesterdayYear}) */}
+                    Create a new playlist based on the music played yesterday on WQXR.
                 </p>
                 <button 
                     onClick={handleCreateWQXRPlaylist} 
