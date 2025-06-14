@@ -306,7 +306,7 @@ export default function App() {
         <AppContext.Provider value={{ token, view, setView, selectedPlaylistId, setSelectedPlaylistId, player, isPlayerReady, currentTrack, isPaused, logout, deviceId, position, libraryVersion, setLibraryVersion, profile, setProfile, setPlaylistToEdit, setPlaylistToDelete }}>
             <div className="h-screen w-full flex flex-col bg-black text-white font-sans">
                 <div className="flex flex-1 overflow-y-hidden">
-                    <Sidebar />
+                    <Sidebar key={libraryVersion} />
                     <MainContent />
                     <RightSidebar />
                 </div>
