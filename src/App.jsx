@@ -708,7 +708,7 @@ function PlaylistView({ playlistId }) {
             </header>
             
             <div>
-                 {playlist.tracks && playlist.tracks.items && playlist.tracks.items.length > 0 ? (
+                 {playlist.tracks?.items?.length > 0 ? (
                     playlist.tracks.items.map(({ track }, index) => {
                         if(!track) return null;
                         const isPlaying = currentTrack?.uri === track.uri && !isPaused;
@@ -901,7 +901,7 @@ function PlaylistCreator() {
                     }
                 }
             };
-            const apiKey = ""; // IMPORTANT: Add your Gemini API Key here
+            const apiKey = "AIzaSyAsb7lrYNWBzSIUe5RUCOCMib20FzAX61M"; // IMPORTANT: Add your Gemini API Key here
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
             const geminiResponse = await fetch(apiUrl, {
                 method: 'POST',
