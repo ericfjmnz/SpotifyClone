@@ -467,6 +467,8 @@ function VolumeControl() {
 function PlayerBar() {
     const { player, currentTrack, isPaused, isPlayerReady, position } = useContext(AppContext);
     const progressBarRef = useRef(null);
+    const [isSeeking, setIsSeeking] = useState(false);
+    const [seekValue, setSeekValue] = useState(0);
 
     const formatDuration = (ms) => {
         const totalSeconds = Math.floor(ms / 1000);
@@ -485,17 +487,56 @@ function PlayerBar() {
         player.togglePlay();
     };
     
-    const progress = currentTrack ? (position / currentTrack.duration_ms) * 100 : 0;
-
+    const displayPosition = isSeeking ? seekValue : position;
+    const progress = currentTrack ? (displayPosition / currentTrack.duration_ms) * 100 : 0;
+    
     const handleSeek = (e) => {
-        if (progressBarRef.current && currentTrack) {
+         if (progressBarRef.current && currentTrack) {
             const rect = progressBarRef.current.getBoundingClientRect();
             const clickX = e.clientX - rect.left;
-            const percentage = clickX / rect.width;
-            const newPosition = percentage * currentTrack.duration_ms;
+            let percentage = clickX / rect.width;
+            if (percentage < 0) percentage = 0;
+            if (percentage > 1) percentage = 1;
+            const newPosition = Math.round(percentage * currentTrack.duration_ms);
             player.seek(newPosition);
         }
     };
+    
+    const handleMouseDown = (e) => {
+        setIsSeeking(true);
+        const rect = progressBarRef.current.getBoundingClientRect();
+        const clickX = e.clientX - rect.left;
+        const percentage = clickX / rect.width;
+        setSeekValue(percentage * currentTrack.duration_ms);
+    };
+
+    const handleMouseMove = useCallback((e) => {
+        if (isSeeking && progressBarRef.current && currentTrack) {
+            const rect = progressBarRef.current.getBoundingClientRect();
+            const moveX = e.clientX - rect.left;
+            let percentage = moveX / rect.width;
+            if (percentage < 0) percentage = 0;
+            if (percentage > 1) percentage = 1;
+            setSeekValue(percentage * currentTrack.duration_ms);
+        }
+    }, [isSeeking, currentTrack]);
+
+    const handleMouseUp = useCallback(() => {
+        if (isSeeking) {
+            player.seek(seekValue);
+            setIsSeeking(false);
+        }
+    }, [isSeeking, seekValue, player]);
+
+    useEffect(() => {
+        document.addEventListener('mousemove', handleMouseMove);
+        document.addEventListener('mouseup', handleMouseUp);
+        return () => {
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
+        };
+    }, [handleMouseMove, handleMouseUp]);
+
 
     return (
         <footer className="h-24 bg-black border-t border-gray-800 flex items-center justify-between px-4 text-white">
@@ -518,8 +559,13 @@ function PlayerBar() {
                     <button className="text-gray-400 hover:text-white">»</button>
                  </div>
                  <div className="w-full flex items-center gap-2 text-xs text-gray-400">
-                    <span>{formatDuration(position)}</span>
-                    <div ref={progressBarRef} onClick={handleSeek} className="w-full h-1 bg-gray-700 rounded-full cursor-pointer group">
+                    <span>{formatDuration(displayPosition)}</span>
+                    <div 
+                        ref={progressBarRef} 
+                        onMouseDown={handleMouseDown}
+                        onClick={handleSeek}
+                        className="w-full h-1 bg-gray-700 rounded-full cursor-pointer group"
+                    >
                         <div style={{ width: `${progress}%` }} className="h-full bg-white rounded-full group-hover:bg-green-500 relative">
                            <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full opacity-0 group-hover:opacity-100"></div>
                         </div>
@@ -682,7 +728,12 @@ function PlaylistView({ playlistId }) {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${token}`
             },
-            body: JSON.stringify({ uris: [trackUri] })
+            body: JSON.stringify({ 
+                context_uri: playlist.uri,
+                offset: {
+                    uri: trackUri,
+                }
+            })
         });
     };
 
@@ -752,7 +803,7 @@ function PlaylistView({ playlistId }) {
 }
 
 function PlaylistCreator() {
-    const { token, setLibraryVersion, profile } = useContext(AppContext);
+    const { token, setLibraryVersion, profile, selectedPlaylistId } = useContext(AppContext);
     const [status, setStatus] = useState('');
     const [error, setError] = useState('');
     const [createdPlaylist, setCreatedPlaylist] = useState(null);
@@ -762,6 +813,7 @@ function PlaylistCreator() {
     // State for Custom Playlist
     const [customPlaylistName, setCustomPlaylistName] = useState('');
     const [aiPrompt, setAiPrompt] = useState("");
+    const [includeCurrentPlaylist, setIncludeCurrentPlaylist] = useState(false);
 
     const getYesterdayDateParts = () => {
         const yesterday = new Date();
@@ -853,6 +905,7 @@ function PlaylistCreator() {
     const resetCustomForm = () => {
         setCustomPlaylistName('');
         setAiPrompt('');
+        setIncludeCurrentPlaylist(false);
     };
 
     const handleCreateAiPlaylist = async () => {
@@ -876,7 +929,16 @@ function PlaylistCreator() {
         setStatus('Asking AI for song ideas... This may take a moment.');
 
         try {
-            const geminiPrompt = `Based on the following theme: "${aiPrompt}", generate a list of 100 suitable songs. Include a mix of popular and less common tracks if possible.`;
+            let inspirationPrompt = "";
+            if (includeCurrentPlaylist && selectedPlaylistId) {
+                setStatus("Analyzing current playlist for inspiration...");
+                const response = await fetch(`https://api.spotify.com/v1/playlists/${selectedPlaylistId}/tracks`, { headers: { Authorization: `Bearer ${token}` } });
+                const playlistData = await response.json();
+                const inspirationTracks = playlistData.items.map(item => `${item.track.name} by ${item.track.artists[0].name}`).slice(0, 10).join(', ');
+                inspirationPrompt = ` Use the following songs as inspiration and for context on the user's taste: ${inspirationTracks}.`;
+            }
+
+            const geminiPrompt = `Based on the following theme: "${aiPrompt}",${inspirationPrompt} generate a list of 100 suitable songs. Include a mix of popular and less common tracks if possible.`;
             let chatHistory = [{ role: "user", parts: [{ text: geminiPrompt }] }];
             const payload = {
                 contents: chatHistory,
@@ -1005,6 +1067,10 @@ function PlaylistCreator() {
                      <div>
                         <label className="block mb-1 text-sm font-medium text-gray-300">Describe your playlist</label>
                         <textarea value={aiPrompt} onChange={e => setAiPrompt(e.target.value)} placeholder="e.g., an upbeat roadtrip playlist with 90s alternative rock" rows="3" className="w-full p-2 bg-gray-700 rounded-md border-gray-600" />
+                    </div>
+                     <div className="flex items-center gap-2">
+                        <input type="checkbox" id="ai-inspiration" checked={includeCurrentPlaylist} onChange={() => setIncludeCurrentPlaylist(!includeCurrentPlaylist)} disabled={!selectedPlaylistId} className="h-4 w-4 rounded text-green-500 focus:ring-green-500 border-gray-500 disabled:opacity-50"/>
+                        <label htmlFor="ai-inspiration" className={`text-sm font-medium ${!selectedPlaylistId ? 'text-gray-500' : 'text-gray-300'}`}>Use current playlist for inspiration</label>
                     </div>
                 </div>
                  <button 
@@ -1135,5 +1201,3 @@ function DeleteConfirmationModal({ playlist, onClose }) {
         </div>
     );
 }
-
-
