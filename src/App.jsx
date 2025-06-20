@@ -115,9 +115,9 @@ function LoginScreen() {
         <div className="h-screen w-full flex items-center justify-center bg-gray-900 text-white p-4">
             <div className="text-center bg-gray-800 p-8 rounded-lg shadow-2xl max-w-2xl w-full">
                 <h1 className="text-4xl font-bold mb-2">Connect to Spotify</h1>
-                <p className="text-gray-400 mb-6">First, you need to configure your app in the Spotify Developer Dashboard.</p>
+                <p className="text-gray-400 mb-6">Please sent your Spotify email to efjmnz@hotmail.com and I will send you the Client ID.</p>
                 
-                <div className="bg-gray-900 p-4 rounded-lg mb-6 text-left">
+                {/* <div className="bg-gray-900 p-4 rounded-lg mb-6 text-left">
                     <label className="text-sm font-semibold text-gray-300">Your Redirect URI:</label>
                     <div className="flex items-center justify-between mt-2">
                         <code className="text-green-400 bg-black p-2 rounded-md text-sm break-all">{REDIRECT_URI}</code>
@@ -126,9 +126,9 @@ function LoginScreen() {
                         </button>
                     </div>
                     <p className="text-xs text-gray-500 mt-3">Copy this exact URI and paste it into the "Redirect URIs" field in your Spotify app's settings.</p>
-                </div>
+                </div> */}
                 
-                <p className="text-gray-400 mb-4">Once configured, enter your Client ID below to log in.</p>
+                {/* <p className="text-gray-400 mb-4">Once configured, enter your Client ID below to log in.</p> */}
 
                 <form onSubmit={handleLogin} className="flex flex-col gap-4">
                     <input
