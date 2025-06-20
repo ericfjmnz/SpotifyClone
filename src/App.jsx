@@ -115,7 +115,7 @@ function LoginScreen() {
         <div className="h-screen w-full flex items-center justify-center bg-gray-900 text-white p-4">
             <div className="text-center bg-gray-800 p-8 rounded-lg shadow-2xl max-w-2xl w-full">
                 <h1 className="text-4xl font-bold mb-2">Connect to Spotify</h1>
-                <p className="text-gray-400 mb-6">Please sent your Spotify email to efjmnz@hotmail.com and I will send you the Client ID.</p>
+                <p className="text-gray-400 mb-6">Please send your Spotify email to efjmnz@hotmail.com and I will send you the Client ID.</p>
                 
                 {/* <div className="bg-gray-900 p-4 rounded-lg mb-6 text-left">
                     <label className="text-sm font-semibold text-gray-300">Your Redirect URI:</label>
