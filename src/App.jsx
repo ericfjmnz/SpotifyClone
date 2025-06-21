@@ -328,7 +328,7 @@ function Sidebar() {
     const [activeMenu, setActiveMenu] = useState(null);
     
     const NavItem = ({ label, targetView, icon }) => (
-         <li
+           <li
             onClick={() => {
                 setView(targetView);
                 setSelectedPlaylistId(null);
@@ -367,7 +367,7 @@ function Sidebar() {
                                 {profile?.id === playlist.owner.id && (
                                 <div className="relative">
                                     <button onClick={() => setActiveMenu(activeMenu === playlist.id ? null : playlist.id)} className="hidden group-hover:block p-1">
-                                         <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 16 16"><path d="M9.5 13a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/></svg>
+                                           <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 16 16"><path d="M9.5 13a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/></svg>
                                     </button>
                                     {activeMenu === playlist.id && (
                                         <div className="absolute right-0 bottom-full mb-1 w-32 bg-gray-800 rounded-md shadow-lg z-10">
@@ -650,11 +650,11 @@ function HomePage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {recent?.items.map(({ track }, index) => (
                        <div key={`${track.id}-${index}`} className="bg-white/10 hover:bg-white/20 transition-colors duration-300 rounded-md flex items-center gap-4 group cursor-pointer overflow-hidden">
-                           <img src={track.album.images[0]?.url || 'https://placehold.co/80x80/181818/FFFFFF?text=...'} alt={track.name} className="w-20 h-20 flex-shrink-0"/>
-                           <p className="font-semibold text-white flex-1 pr-2">{track.name}</p>
-                           <div className="mr-4 w-12 h-12 bg-green-500 rounded-full items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 shadow-xl hidden sm:flex">
+                            <img src={track.album.images[0]?.url || 'https://placehold.co/80x80/181818/FFFFFF?text=...'} alt={track.name} className="w-20 h-20 flex-shrink-0"/>
+                            <p className="font-semibold text-white flex-1 pr-2">{track.name}</p>
+                            <div className="mr-4 w-12 h-12 bg-green-500 rounded-full items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 shadow-xl hidden sm:flex">
                              <svg className="w-6 h-6 text-black" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                           </div>
+                            </div>
                        </div> 
                     ))}
                 </div>
@@ -744,12 +744,12 @@ function PlaylistView({ playlistId }) {
                                    { isPlaying ?
                                        ( <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-green-500 animate-pulse"><path d="M2.69231 6.30769V9.69231H0V6.30769H2.69231ZM6.76923 12.4615V3.53846H4.07692V12.4615H6.76923ZM10.8462 16V0H8.15385V16H10.8462ZM14.9231 12.4615V3.53846H12.2308V12.4615H14.9231Z" fill="currentColor"/></svg> ) :
                                        ( <>
-                                           <span className="group-hover:hidden">{index + 1}</span>
-                                           <button onClick={() => playTrack(track.uri)} className="text-white hidden group-hover:block">
-                                               <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                                           </button>
+                                            <span className="group-hover:hidden">{index + 1}</span>
+                                            <button onClick={() => playTrack(track.uri)} className="text-white hidden group-hover:block">
+                                                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                                            </button>
                                        </> )
-                                   }
+                                    }
                                 </div>
                                 <div className="flex items-center gap-4">
                                     <img src={track.album.images[2]?.url || 'https://placehold.co/40x40/181818/FFFFFF?text=...'} alt={track.name} className="w-10 h-10"/>
@@ -780,7 +780,13 @@ function PlaylistCreator() {
     const [isWqxrLoading, setIsWqxrLoading] = useState(false);
     const [wqxrProgress, setWqxrProgress] = useState(0); // New state for progress
     const [isCustomLoading, setIsCustomLoading] = useState(false);
-    
+    // New states for Top Tracks Playlist
+    const [isTopTracksLoading, setIsTopTracksLoading] = useState(false);
+    const [topTracksProgress, setTopTracksProgress] = useState(0); 
+    // New states for All Songs Playlist
+    const [isAllSongsLoading, setIsAllSongsLoading] = useState(false);
+    const [allSongsProgress, setAllSongsProgress] = useState(0);
+
     // State for Custom Playlist
     const [customPlaylistName, setCustomPlaylistName] = useState('');
     const [aiPrompt, setAiPrompt] = useState("");
@@ -996,6 +1002,143 @@ function PlaylistCreator() {
         }
     };
 
+    // New function for creating playlist from top tracks
+    const handleCreateTopTracksPlaylist = async () => {
+        if (!profile) {
+            setError('Could not get user profile. Please try again.');
+            return;
+        }
+        setIsTopTracksLoading(true);
+        setError('');
+        setCreatedPlaylist(null);
+        setTopTracksProgress(0);
+        setStatus('Fetching your top tracks from Spotify...');
+
+        try {
+            // Fetch top tracks (Spotify API supports limit up to 50 for top tracks)
+            const response = await fetch(`https://api.spotify.com/v1/me/top/tracks?limit=50`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            if (!response.ok) {
+                throw new Error(`Failed to fetch top tracks: ${response.status}`);
+            }
+            const data = await response.json();
+            const topTracks = data.items;
+
+            if (!topTracks || topTracks.length === 0) {
+                throw new Error('Could not find any top tracks. Listen to more music on Spotify!');
+            }
+
+            const trackUris = topTracks.map(track => track.uri);
+
+            setStatus(`Found ${trackUris.length} top tracks. Creating playlist...`);
+            const playlistName = `My Top Tracks - ${new Date().toLocaleDateString()}`;
+            const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ name: playlistName, description: 'A playlist generated from your top Spotify tracks.', public: false })
+            });
+            const newPlaylist = await playlistResponse.json();
+
+            setStatus('Adding tracks to your new top tracks playlist...');
+            // Spotify API can add up to 100 tracks at a time
+            await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ uris: trackUris })
+            });
+
+            setCreatedPlaylist(newPlaylist);
+            setStatus('Top tracks playlist created successfully!');
+            setLibraryVersion(v => v + 1); // Trigger a refresh of the sidebar playlists
+        } catch (e) {
+            setError(e.message);
+            setStatus('');
+            console.error(e);
+        } finally {
+            setIsTopTracksLoading(false);
+            setTopTracksProgress(0);
+        }
+    };
+
+    // Function to create a playlist with all saved Spotify songs
+    const handleCreateAllSongsPlaylist = async () => {
+        if (!profile) {
+            setError('Could not get user profile. Please try again.');
+            return;
+        }
+        setIsAllSongsLoading(true);
+        setError('');
+        setCreatedPlaylist(null);
+        setAllSongsProgress(0);
+        setStatus('Fetching all your saved songs from Spotify. This may take a while...');
+
+        try {
+            let allTrackUris = [];
+            let nextUrl = '/me/tracks?limit=50'; // Start with the first page of saved tracks
+
+            while (nextUrl) {
+                const response = await fetch(`https://api.spotify.com/v1${nextUrl}`, {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch saved tracks: ${response.status}`);
+                }
+                const data = await response.json();
+                
+                // Add current page's track URIs to the overall list
+                allTrackUris = allTrackUris.concat(data.items.map(item => item.track.uri));
+                
+                // Update progress based on total fetched vs. total expected (if total is available, otherwise just count)
+                if (data.total) {
+                    setAllSongsProgress((allTrackUris.length / data.total) * 100);
+                } else {
+                    setAllSongsProgress(prev => prev + (data.items.length / 50) * 100); // Rough estimate if total isn't precise
+                }
+                setStatus(`Fetched ${allTrackUris.length} songs so far...`);
+                nextUrl = data.next ? new URL(data.next).search : null; // Get only the query part for the next call
+            }
+
+            if (allTrackUris.length === 0) {
+                throw new Error('You have no saved songs in your Spotify library.');
+            }
+
+            setStatus(`Found ${allTrackUris.length} songs. Creating playlist...`);
+            const playlistName = `All My Spotify Songs - ${new Date().toLocaleDateString()}`;
+            const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ name: playlistName, description: 'A playlist containing all your saved Spotify songs.', public: false })
+            });
+            const newPlaylist = await playlistResponse.json();
+
+            setStatus(`Adding ${allTrackUris.length} songs to the playlist. This may take some time for large libraries.`);
+
+            // Spotify API allows adding up to 100 tracks per request
+            const chunkSize = 100;
+            for (let i = 0; i < allTrackUris.length; i += chunkSize) {
+                const chunk = allTrackUris.slice(i, i + chunkSize);
+                await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                    body: JSON.stringify({ uris: chunk })
+                });
+                setAllSongsProgress( ( (i + chunk.length) / allTrackUris.length) * 100);
+            }
+
+            setCreatedPlaylist(newPlaylist);
+            setStatus('All My Songs playlist created successfully!');
+            setLibraryVersion(v => v + 1); // Trigger a refresh of the sidebar playlists
+        } catch (e) {
+            setError(e.message);
+            setStatus('');
+            console.error("Error creating all songs playlist:", e);
+        } finally {
+            setIsAllSongsLoading(false);
+            setAllSongsProgress(0);
+        }
+    };
+
 
     return (
         <div className="space-y-8">
@@ -1011,7 +1154,7 @@ function PlaylistCreator() {
                 </p>
                 <button 
                     onClick={handleCreateWQXRPlaylist} 
-                    disabled={isWqxrLoading || isCustomLoading}
+                    disabled={isWqxrLoading || isCustomLoading || isTopTracksLoading || isAllSongsLoading}
                     className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
                 >
                     {isWqxrLoading ? 'Creating...' : "Create Yesterday's Playlist"}
@@ -1022,6 +1165,52 @@ function PlaylistCreator() {
                             <div className="bg-blue-500 h-2.5 rounded-full" style={{ width: `${wqxrProgress}%` }}></div>
                         </div>
                         <p className="text-center text-sm text-gray-300 mt-1">{Math.round(wqxrProgress)}%</p>
+                    </div>
+                )}
+            </div>
+
+            {/* New section for Top Tracks Playlist */}
+            <div className="bg-gray-800 p-6 rounded-lg">
+                <h2 className="text-xl font-semibold mb-2">Playlist from Your Top Tracks</h2>
+                <p className="text-gray-400 mb-4">
+                    Instantly create a new playlist composed of your 50 most listened to tracks on Spotify.
+                </p>
+                <button 
+                    onClick={handleCreateTopTracksPlaylist} 
+                    disabled={isWqxrLoading || isCustomLoading || isTopTracksLoading || isAllSongsLoading}
+                    className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
+                >
+                    {isTopTracksLoading ? 'Creating...' : "Create Top Tracks Playlist"}
+                </button>
+                {isTopTracksLoading && (
+                    <div className="mt-4">
+                        <div className="w-full bg-gray-600 rounded-full h-2.5">
+                            <div className="bg-purple-500 h-2.5 rounded-full" style={{ width: `${topTracksProgress}%` }}></div>
+                        </div>
+                        <p className="text-center text-sm text-gray-300 mt-1">{Math.round(topTracksProgress)}%</p>
+                    </div>
+                )}
+            </div>
+
+            {/* New section for All Songs Playlist */}
+            <div className="bg-gray-800 p-6 rounded-lg">
+                <h2 className="text-xl font-semibold mb-2">Playlist with All Your Saved Songs</h2>
+                <p className="text-gray-400 mb-4">
+                    Create a single playlist containing every song you've saved to your Spotify library.
+                </p>
+                <button 
+                    onClick={handleCreateAllSongsPlaylist} 
+                    disabled={isWqxrLoading || isCustomLoading || isTopTracksLoading || isAllSongsLoading}
+                    className="bg-orange-600 hover:bg-orange-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
+                >
+                    {isAllSongsLoading ? 'Creating...' : "Create All My Songs Playlist"}
+                </button>
+                {isAllSongsLoading && (
+                    <div className="mt-4">
+                        <div className="w-full bg-gray-600 rounded-full h-2.5">
+                            <div className="bg-orange-500 h-2.5 rounded-full" style={{ width: `${allSongsProgress}%` }}></div>
+                        </div>
+                        <p className="text-center text-sm text-gray-300 mt-1">{Math.round(allSongsProgress)}%</p>
                     </div>
                 )}
             </div>
@@ -1043,7 +1232,7 @@ function PlaylistCreator() {
                 </div>
                 <button 
                     onClick={handleCreateAiPlaylist} 
-                    disabled={isWqxrLoading || isCustomLoading}
+                    disabled={isWqxrLoading || isCustomLoading || isTopTracksLoading || isAllSongsLoading}
                     className="mt-6 bg-green-600 hover:bg-green-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
                 >
                     {isCustomLoading ? 'Creating...' : "Create AI Playlist"}
@@ -1073,7 +1262,7 @@ function SearchView() {
             const searchQuery = encodeURIComponent(query);
             const type = "track,artist,album";
             const response = await fetch(`https://api.spotify.com/v1/search?q=${searchQuery}&type=${type}&limit=10`, {
-                 headers: { Authorization: `Bearer ${token}` }
+                   headers: { Authorization: `Bearer ${token}` }
             });
             const data = await response.json();
             setResults(data);
@@ -1119,7 +1308,7 @@ function TrackResults({ tracks }) {
         return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
     };
     return (
-         <ContentSection title="Songs">
+           <ContentSection title="Songs">
             {tracks.map(track => (
                 <div key={track.id} onDoubleClick={() => playTrack(track.uri)} className="grid grid-cols-[auto,1fr,auto] items-center gap-4 p-2 rounded-md hover:bg-white/10 group">
                     <img src={track.album.images[2]?.url || 'https://placehold.co/40x40/181818/FFFFFF?text=...'} alt={track.name} className="w-10 h-10"/>
@@ -1220,12 +1409,12 @@ function EditPlaylistModal({ playlist, onClose }) {
                         {error && <p className="text-red-400 mb-4">{error}</p>}
                         <div className="space-y-4">
                              <div>
-                                <label htmlFor="name" className="block text-sm font-bold text-gray-300 mb-1">Name</label>
-                                <input type="text" id="name" value={name} onChange={e => setName(e.target.value)} required className="w-full p-2 bg-gray-700 rounded-md border-gray-600"/>
+                                 <label htmlFor="name" className="block text-sm font-bold text-gray-300 mb-1">Name</label>
+                                 <input type="text" id="name" value={name} onChange={e => setName(e.target.value)} required className="w-full p-2 bg-gray-700 rounded-md border-gray-600"/>
                              </div>
                              <div>
-                                <label htmlFor="description" className="block text-sm font-bold text-gray-300 mb-1">Description</label>
-                                <textarea id="description" value={description} onChange={e => setDescription(e.target.value)} rows="3" className="w-full p-2 bg-gray-700 rounded-md border-gray-600"></textarea>
+                                 <label htmlFor="description" className="block text-sm font-bold text-gray-300 mb-1">Description</label>
+                                 <textarea id="description" value={description} onChange={e => setDescription(e.target.value)} rows="3" className="w-full p-2 bg-gray-700 rounded-md border-gray-600"></textarea>
                              </div>
                         </div>
                     </div>
