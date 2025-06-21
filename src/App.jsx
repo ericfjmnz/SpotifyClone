@@ -1075,11 +1075,10 @@ function PlaylistCreator() {
 
         try {
             let allPlaylists = [];
-            // Start with the full API URL for playlists
             let nextPlaylistsUrl = 'https://api.spotify.com/v1/me/playlists?limit=50'; 
 
             while (nextPlaylistsUrl) {
-                const response = await fetch(nextPlaylistsUrl, { // Use the full URL directly
+                const response = await fetch(nextPlaylistsUrl, { 
                     headers: { Authorization: `Bearer ${token}` }
                 });
                 if (!response.ok) {
@@ -1087,7 +1086,7 @@ function PlaylistCreator() {
                 }
                 const data = await response.json();
                 allPlaylists = allPlaylists.concat(data.items);
-                nextPlaylistsUrl = data.next; // Assign the full URL for the next page
+                nextPlaylistsUrl = data.next; 
             }
 
             if (allPlaylists.length === 0) {
@@ -1100,20 +1099,18 @@ function PlaylistCreator() {
             let processedPlaylistsCount = 0;
 
             for (const playlist of allPlaylists) {
-                // Start with the full API URL for playlist tracks
                 let nextTracksUrl = `https://api.spotify.com/v1/playlists/${playlist.id}/tracks?limit=100`;
                 while (nextTracksUrl) {
-                    const response = await fetch(nextTracksUrl, { // Use the full URL directly
+                    const response = await fetch(nextTracksUrl, { 
                         headers: { Authorization: `Bearer ${token}` }
                     });
                     if (!response.ok) {
                         console.warn(`Failed to fetch tracks for playlist "${playlist.name}" (${playlist.id}): ${response.status}`);
-                        break; // Skip to next playlist if unable to fetch tracks
+                        break; 
                     }
                     const data = await response.json();
-                    if (data.items) { // Ensure data.items exists before iterating
+                    if (data.items) { 
                         data.items.forEach(item => {
-                            // Ensure track and track.uri exist and are valid before adding
                             if (item.track && typeof item.track.uri === 'string' && item.track.uri.startsWith('spotify:track:')) {
                                 uniqueTrackUris.add(item.track.uri);
                             } else {
@@ -1121,7 +1118,7 @@ function PlaylistCreator() {
                             }
                         });
                     }
-                    nextTracksUrl = data.next; // Assign the full URL for the next page
+                    nextTracksUrl = data.next; 
                 }
                 processedPlaylistsCount++;
                 setAllSongsProgress((processedPlaylistsCount / allPlaylists.length) * 100);
@@ -1134,39 +1131,58 @@ function PlaylistCreator() {
                 throw new Error('Could not find any unique songs across your playlists.');
             }
 
-            setStatus(`Found ${trackUrisArray.length} unique songs. Creating new playlist...`);
-            const playlistName = `All My Playlists Songs - ${new Date().toLocaleDateString()}`;
-            const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ name: playlistName, description: 'A playlist containing all unique songs from your Spotify playlists.', public: false })
-            });
-            const newPlaylist = await playlistResponse.json();
+            const SPOTIFY_PLAYLIST_LIMIT = 10000; // Spotify's maximum playlist size
+            const totalSongs = trackUrisArray.length;
+            const numberOfPlaylists = Math.ceil(totalSongs / SPOTIFY_PLAYLIST_LIMIT);
+            const createdPlaylistsInfo = [];
 
-            setStatus(`Adding ${trackUrisArray.length} songs to the new playlist. This may take some time for large libraries.`);
+            for (let p = 0; p < numberOfPlaylists; p++) {
+                const startIdx = p * SPOTIFY_PLAYLIST_LIMIT;
+                const endIdx = Math.min(startIdx + SPOTIFY_PLAYLIST_LIMIT, totalSongs);
+                const currentChunkOfTracks = trackUrisArray.slice(startIdx, endIdx);
+                
+                const playlistName = `All My Playlists Songs - Part ${p + 1} - ${new Date().toLocaleDateString()}`;
+                const description = `Part ${p + 1} of a playlist containing all unique songs from your Spotify playlists.`;
 
-            // Spotify API allows adding up to 100 tracks per request
-            const chunkSize = 100;
-            for (let i = 0; i < trackUrisArray.length; i += chunkSize) {
-                const chunk = trackUrisArray.slice(i, i + chunkSize);
-                console.log(`Sending chunk ${Math.floor(i / chunkSize) + 1} with ${chunk.length} URIs:`, chunk); // Log the chunk
-                const addTracksResponse = await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
+                setStatus(`Creating playlist "${playlistName}" (${p + 1}/${numberOfPlaylists})...`);
+                const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                    body: JSON.stringify({ uris: chunk })
+                    body: JSON.stringify({ name: playlistName, description: description, public: false })
                 });
 
-                if (!addTracksResponse.ok) {
-                    const errorBody = await addTracksResponse.json();
-                    console.error("Error adding tracks chunk:", errorBody); // Log the specific error from Spotify
-                    throw new Error(`Failed to add tracks to playlist: ${addTracksResponse.status} - ${errorBody.error?.message || 'Unknown error'}`);
+                if (!playlistResponse.ok) {
+                    const errorBody = await playlistResponse.json();
+                    throw new Error(`Failed to create playlist "${playlistName}": ${playlistResponse.status} - ${errorBody.error?.message || 'Unknown error'}`);
                 }
-                setAllSongsProgress( ( (i + chunk.length) / trackUrisArray.length) * 100);
-            }
+                const newPlaylist = await playlistResponse.json();
+                createdPlaylistsInfo.push(newPlaylist);
 
-            setCreatedPlaylist(newPlaylist);
-            setStatus('All My Playlists Songs playlist created successfully!');
-            setLibraryVersion(v => v + 1); // Trigger a refresh of the sidebar playlists
+                setStatus(`Adding ${currentChunkOfTracks.length} songs to "${playlistName}"...`);
+                const chunkSizeForAdding = 100;
+                for (let i = 0; i < currentChunkOfTracks.length; i += chunkSizeForAdding) {
+                    const chunk = currentChunkOfTracks.slice(i, i + chunkSizeForAdding);
+                    const addTracksResponse = await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                        body: JSON.stringify({ uris: chunk })
+                    });
+
+                    if (!addTracksResponse.ok) {
+                        const errorBody = await addTracksResponse.json();
+                        console.error(`Error adding tracks chunk to playlist ${newPlaylist.name}:`, errorBody);
+                        throw new Error(`Failed to add tracks to playlist "${newPlaylist.name}": ${addTracksResponse.status} - ${errorBody.error?.message || 'Unknown error'}`);
+                    }
+                    // Update overall progress based on all songs being processed
+                    const overallProgress = ((startIdx + i + chunk.length) / totalSongs) * 100;
+                    setAllSongsProgress(overallProgress);
+                }
+            }
+            
+            setCreatedPlaylist(createdPlaylistsInfo[0]); // Set the first created playlist as the main one for display if needed
+            setStatus(`Successfully created ${numberOfPlaylists} playlist(s)!`);
+            setLibraryVersion(v => v + 1); 
+
         } catch (e) {
             setError(e.message);
             setStatus('');
@@ -1234,7 +1250,7 @@ function PlaylistCreator() {
             <div className="bg-gray-800 p-6 rounded-lg">
                 <h2 className="text-xl font-semibold mb-2">Playlist with All Unique Songs from Your Playlists</h2>
                 <p className="text-gray-400 mb-4">
-                    Create a single playlist containing every unique song from all your existing Spotify playlists.
+                    Create one or more playlists containing every unique song from all your existing Spotify playlists.
                 </p>
                 <button 
                     onClick={handleCreateAllSongsPlaylist} 
@@ -1265,7 +1281,7 @@ function PlaylistCreator() {
                      </div>
                      <div>
                          <label className="block mb-1 text-sm font-medium text-gray-300">Describe your playlist</label>
-                         <textarea value={aiPrompt} onChange={e => setAiPrompt(e.target.value)} placeholder="e.g., an upbeat roadtrip playlist with 90s alternative rock" rows="3" className="w-full p-2 bg-gray-700 rounded-md border-gray-600" />
+                         <textarea value={aiPrompt} onChange={e => setAiPrompt(e.target.value)} placeholder="e.g., an upbeat roadtrip playlist with 90s alternative rock" rows="3" className="w-full p-2 bg-gray-700 rounded-md border-gray-600"></textarea>
                      </div>
                 </div>
                 <button 
