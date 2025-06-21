@@ -42,7 +42,7 @@ function generateCodeVerifier(length) {
 async function generateCodeChallenge(codeVerifier) {
     const data = new TextEncoder().encode(codeVerifier);
     const digest = await window.crypto.subtle.digest('SHA-256', data);
-    return btoa(String.fromCharCode.apply(null, [...new Uint8Array(digest)]))
+    return btoa(String.fromCharCode.apply(null, [...new Uint9Array(digest)]))
         .replace(/\+/g, '-')
         .replace(/\//g, '_')
         .replace(/=+$/, '');
@@ -1061,7 +1061,7 @@ function PlaylistCreator() {
         }
     };
 
-    // Function to create a playlist with all saved Spotify songs
+    // Function to create a playlist with all songs from all user's playlists
     const handleCreateAllSongsPlaylist = async () => {
         if (!profile) {
             setError('Could not get user profile. Please try again.');
@@ -1105,15 +1105,20 @@ function PlaylistCreator() {
                         headers: { Authorization: `Bearer ${token}` }
                     });
                     if (!response.ok) {
-                        console.warn(`Failed to fetch tracks for playlist ${playlist.name}: ${response.status}`);
+                        console.warn(`Failed to fetch tracks for playlist "${playlist.name}" (${playlist.id}): ${response.status}`);
                         break; // Skip to next playlist if unable to fetch tracks
                     }
                     const data = await response.json();
-                    data.items.forEach(item => {
-                        if (item.track && item.track.uri) {
-                            uniqueTrackUris.add(item.track.uri);
-                        }
-                    });
+                    if (data.items) { // Ensure data.items exists before iterating
+                        data.items.forEach(item => {
+                            // Ensure track and track.uri exist and are valid before adding
+                            if (item.track && typeof item.track.uri === 'string' && item.track.uri.startsWith('spotify:track:')) {
+                                uniqueTrackUris.add(item.track.uri);
+                            } else {
+                                console.warn(`Skipping invalid track URI from playlist "${playlist.name}":`, item.track);
+                            }
+                        });
+                    }
                     nextTracksUrl = data.next ? new URL(data.next).search : null;
                 }
                 processedPlaylistsCount++;
@@ -1142,11 +1147,18 @@ function PlaylistCreator() {
             const chunkSize = 100;
             for (let i = 0; i < trackUrisArray.length; i += chunkSize) {
                 const chunk = trackUrisArray.slice(i, i + chunkSize);
-                await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
+                console.log(`Sending chunk ${Math.floor(i / chunkSize) + 1} with ${chunk.length} URIs:`, chunk); // Log the chunk
+                const addTracksResponse = await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                     body: JSON.stringify({ uris: chunk })
                 });
+
+                if (!addTracksResponse.ok) {
+                    const errorBody = await addTracksResponse.json();
+                    console.error("Error adding tracks chunk:", errorBody); // Log the specific error from Spotify
+                    throw new Error(`Failed to add tracks to playlist: ${addTracksResponse.status} - ${errorBody.error?.message || 'Unknown error'}`);
+                }
                 setAllSongsProgress( ( (i + chunk.length) / trackUrisArray.length) * 100);
             }
 
