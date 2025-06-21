@@ -1075,10 +1075,11 @@ function PlaylistCreator() {
 
         try {
             let allPlaylists = [];
-            let nextPlaylistsUrl = '/me/playlists?limit=50'; // Start with the first page of playlists
+            // Start with the full API URL for playlists
+            let nextPlaylistsUrl = 'https://api.spotify.com/v1/me/playlists?limit=50'; 
 
             while (nextPlaylistsUrl) {
-                const response = await fetch(`https://api.spotify.com/v1${nextPlaylistsUrl}`, {
+                const response = await fetch(nextPlaylistsUrl, { // Use the full URL directly
                     headers: { Authorization: `Bearer ${token}` }
                 });
                 if (!response.ok) {
@@ -1086,7 +1087,7 @@ function PlaylistCreator() {
                 }
                 const data = await response.json();
                 allPlaylists = allPlaylists.concat(data.items);
-                nextPlaylistsUrl = data.next ? new URL(data.next).search : null;
+                nextPlaylistsUrl = data.next; // Assign the full URL for the next page
             }
 
             if (allPlaylists.length === 0) {
@@ -1099,9 +1100,10 @@ function PlaylistCreator() {
             let processedPlaylistsCount = 0;
 
             for (const playlist of allPlaylists) {
-                let nextTracksUrl = `/playlists/${playlist.id}/tracks?limit=100`;
+                // Start with the full API URL for playlist tracks
+                let nextTracksUrl = `https://api.spotify.com/v1/playlists/${playlist.id}/tracks?limit=100`;
                 while (nextTracksUrl) {
-                    const response = await fetch(`https://api.spotify.com/v1${nextTracksUrl}`, {
+                    const response = await fetch(nextTracksUrl, { // Use the full URL directly
                         headers: { Authorization: `Bearer ${token}` }
                     });
                     if (!response.ok) {
@@ -1119,7 +1121,7 @@ function PlaylistCreator() {
                             }
                         });
                     }
-                    nextTracksUrl = data.next ? new URL(data.next).search : null;
+                    nextTracksUrl = data.next; // Assign the full URL for the next page
                 }
                 processedPlaylistsCount++;
                 setAllSongsProgress((processedPlaylistsCount / allPlaylists.length) * 100);
