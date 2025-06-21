@@ -1071,68 +1071,92 @@ function PlaylistCreator() {
         setError('');
         setCreatedPlaylist(null);
         setAllSongsProgress(0);
-        setStatus('Fetching all your saved songs from Spotify. This may take a while...');
+        setStatus('Fetching all your playlists. This may take a while...');
 
         try {
-            let allTrackUris = [];
-            let nextUrl = '/me/tracks?limit=50'; // Start with the first page of saved tracks
+            let allPlaylists = [];
+            let nextPlaylistsUrl = '/me/playlists?limit=50'; // Start with the first page of playlists
 
-            while (nextUrl) {
-                const response = await fetch(`https://api.spotify.com/v1${nextUrl}`, {
+            while (nextPlaylistsUrl) {
+                const response = await fetch(`https://api.spotify.com/v1${nextPlaylistsUrl}`, {
                     headers: { Authorization: `Bearer ${token}` }
                 });
                 if (!response.ok) {
-                    throw new Error(`Failed to fetch saved tracks: ${response.status}`);
+                    throw new Error(`Failed to fetch playlists: ${response.status}`);
                 }
                 const data = await response.json();
-                
-                // Add current page's track URIs to the overall list
-                allTrackUris = allTrackUris.concat(data.items.map(item => item.track.uri));
-                
-                // Update progress based on total fetched vs. total expected (if total is available, otherwise just count)
-                if (data.total) {
-                    setAllSongsProgress((allTrackUris.length / data.total) * 100);
-                } else {
-                    setAllSongsProgress(prev => prev + (data.items.length / 50) * 100); // Rough estimate if total isn't precise
+                allPlaylists = allPlaylists.concat(data.items);
+                nextPlaylistsUrl = data.next ? new URL(data.next).search : null;
+            }
+
+            if (allPlaylists.length === 0) {
+                throw new Error('You have no playlists in your Spotify library.');
+            }
+            
+            setStatus(`Found ${allPlaylists.length} playlists. Fetching tracks from each playlist...`);
+
+            const uniqueTrackUris = new Set();
+            let processedPlaylistsCount = 0;
+
+            for (const playlist of allPlaylists) {
+                let nextTracksUrl = `/playlists/${playlist.id}/tracks?limit=100`;
+                while (nextTracksUrl) {
+                    const response = await fetch(`https://api.spotify.com/v1${nextTracksUrl}`, {
+                        headers: { Authorization: `Bearer ${token}` }
+                    });
+                    if (!response.ok) {
+                        console.warn(`Failed to fetch tracks for playlist ${playlist.name}: ${response.status}`);
+                        break; // Skip to next playlist if unable to fetch tracks
+                    }
+                    const data = await response.json();
+                    data.items.forEach(item => {
+                        if (item.track && item.track.uri) {
+                            uniqueTrackUris.add(item.track.uri);
+                        }
+                    });
+                    nextTracksUrl = data.next ? new URL(data.next).search : null;
                 }
-                setStatus(`Fetched ${allTrackUris.length} songs so far...`);
-                nextUrl = data.next ? new URL(data.next).search : null; // Get only the query part for the next call
+                processedPlaylistsCount++;
+                setAllSongsProgress((processedPlaylistsCount / allPlaylists.length) * 100);
+                setStatus(`Processed ${processedPlaylistsCount} of ${allPlaylists.length} playlists. Found ${uniqueTrackUris.size} unique songs.`);
             }
 
-            if (allTrackUris.length === 0) {
-                throw new Error('You have no saved songs in your Spotify library.');
+            const trackUrisArray = Array.from(uniqueTrackUris);
+
+            if (trackUrisArray.length === 0) {
+                throw new Error('Could not find any unique songs across your playlists.');
             }
 
-            setStatus(`Found ${allTrackUris.length} songs. Creating playlist...`);
-            const playlistName = `All My Spotify Songs - ${new Date().toLocaleDateString()}`;
+            setStatus(`Found ${trackUrisArray.length} unique songs. Creating new playlist...`);
+            const playlistName = `All My Playlists Songs - ${new Date().toLocaleDateString()}`;
             const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ name: playlistName, description: 'A playlist containing all your saved Spotify songs.', public: false })
+                body: JSON.stringify({ name: playlistName, description: 'A playlist containing all unique songs from your Spotify playlists.', public: false })
             });
             const newPlaylist = await playlistResponse.json();
 
-            setStatus(`Adding ${allTrackUris.length} songs to the playlist. This may take some time for large libraries.`);
+            setStatus(`Adding ${trackUrisArray.length} songs to the new playlist. This may take some time for large libraries.`);
 
             // Spotify API allows adding up to 100 tracks per request
             const chunkSize = 100;
-            for (let i = 0; i < allTrackUris.length; i += chunkSize) {
-                const chunk = allTrackUris.slice(i, i + chunkSize);
+            for (let i = 0; i < trackUrisArray.length; i += chunkSize) {
+                const chunk = trackUrisArray.slice(i, i + chunkSize);
                 await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                     body: JSON.stringify({ uris: chunk })
                 });
-                setAllSongsProgress( ( (i + chunk.length) / allTrackUris.length) * 100);
+                setAllSongsProgress( ( (i + chunk.length) / trackUrisArray.length) * 100);
             }
 
             setCreatedPlaylist(newPlaylist);
-            setStatus('All My Songs playlist created successfully!');
+            setStatus('All My Playlists Songs playlist created successfully!');
             setLibraryVersion(v => v + 1); // Trigger a refresh of the sidebar playlists
         } catch (e) {
             setError(e.message);
             setStatus('');
-            console.error("Error creating all songs playlist:", e);
+            console.error("Error creating all songs from playlists:", e);
         } finally {
             setIsAllSongsLoading(false);
             setAllSongsProgress(0);
@@ -1192,18 +1216,18 @@ function PlaylistCreator() {
                 )}
             </div>
 
-            {/* New section for All Songs Playlist */}
+            {/* New section for All Songs from Playlists */}
             <div className="bg-gray-800 p-6 rounded-lg">
-                <h2 className="text-xl font-semibold mb-2">Playlist with All Your Saved Songs</h2>
+                <h2 className="text-xl font-semibold mb-2">Playlist with All Unique Songs from Your Playlists</h2>
                 <p className="text-gray-400 mb-4">
-                    Create a single playlist containing every song you've saved to your Spotify library.
+                    Create a single playlist containing every unique song from all your existing Spotify playlists.
                 </p>
                 <button 
                     onClick={handleCreateAllSongsPlaylist} 
                     disabled={isWqxrLoading || isCustomLoading || isTopTracksLoading || isAllSongsLoading}
                     className="bg-orange-600 hover:bg-orange-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
                 >
-                    {isAllSongsLoading ? 'Creating...' : "Create All My Songs Playlist"}
+                    {isAllSongsLoading ? 'Creating...' : "Create All My Playlists Songs"}
                 </button>
                 {isAllSongsLoading && (
                     <div className="mt-4">
