@@ -995,7 +995,8 @@ export default function App() {
 
 function Sidebar() {
     const { view, setView, selectedPlaylistId, setSelectedPlaylistId, logout, libraryVersion, profile, setPlaylistToEdit, setPlaylistToDelete } = useContext(AppContext);
-    const { data: playlists, loading: playlistsLoading } = useSpotifyApi(`/me/playlists?limit=50&v=${libraryVersion}`);
+    // Modified useSpotifyApi call to trigger re-fetch when libraryVersion changes
+    const { data: playlists, loading: playlistsLoading } = useSpotifyApi(`/me/playlists?limit=50&v=${libraryVersion}`); 
     const [activeMenu, setActiveMenu] = useState(null);
     
     const NavItem = ({ label, targetView, icon }) => (
@@ -1223,38 +1224,72 @@ const useSpotifyApi = (url) => {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        let isMounted = true; // To prevent state updates on unmounted component
         const fetchData = async () => {
             if (!token || !url) {
-                setLoading(false);
+                if (isMounted) setLoading(false);
                 return;
-            };
-            try {
-                setLoading(true);
-                // Simple cache-busting by adding a timestamp.
-                const cacheBustedUrl = `${url}${url.includes('?') ? '&' : '?'}t=${new Date().getTime()}`;
-                const response = await fetch(`https://api.spotify.com/v1${cacheBustedUrl}`, {
-                    headers: {
-                        Authorization: `Bearer ${token}`,
+            }
+            if (isMounted) setLoading(true);
+
+            let retryCount = 0;
+            const maxRetries = 3;
+            let currentDelay = 100; // Starting delay for initial fetch, a bit higher than 50ms used in internal loops
+
+            while (retryCount <= maxRetries) {
+                try {
+                    // Introduce a delay before each actual API fetch, especially for initial playlist fetch
+                    if (retryCount > 0 || url.includes('/me/playlists')) { 
+                        await new Promise(resolve => setTimeout(resolve, currentDelay));
                     }
-                });
-                if (response.status === 401) { // If token is expired or invalid
-                    logout();
-                    return;
+                    
+                    const cacheBustedUrl = `${url}${url.includes('?') ? '&' : '?'}t=${new Date().getTime()}`;
+                    const response = await fetch(`https://api.spotify.com/v1${cacheBustedUrl}`, {
+                        headers: {
+                            Authorization: `Bearer ${token}`,
+                        }
+                    });
+
+                    if (response.status === 401) {
+                        if (isMounted) logout();
+                        return;
+                    }
+                    if (response.status === 429) {
+                        const retryAfter = response.headers.get('Retry-After');
+                        const delayBeforeRetry = retryAfter ? parseInt(retryAfter, 10) * 1000 : currentDelay * 2;
+                        console.warn(`Spotify API Rate Limit Hit (429). Retrying in ${delayBeforeRetry}ms... (Attempt ${retryCount + 1}/${maxRetries + 1})`);
+                        await new Promise(resolve => setTimeout(resolve, delayBeforeRetry));
+                        currentDelay = delayBeforeRetry; // Update currentDelay for subsequent retries
+                        retryCount++;
+                        continue; // Retry the request
+                    }
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    const result = await response.json();
+                    if (isMounted) {
+                        setData(result);
+                        setLoading(false);
+                    }
+                    return; // Success, break out of loop
+                } catch (e) {
+                    if (isMounted) {
+                        setError(e);
+                        setLoading(false);
+                    }
+                    console.error("useSpotifyApi fetch error:", e);
+                    // If not a 429 or max retries reached, break out of loop
+                    break;
                 }
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const result = await response.json();
-                setData(result);
-            } catch (e) {
-                setError(e);
-            } finally {
-                setLoading(false);
             }
         };
-        fetchData();
-    }, [token, url, logout]);
 
+        fetchData();
+
+        return () => {
+            isMounted = false; // Cleanup flag
+        };
+    }, [token, url, logout]); // Depend on token and url
     return { data, error, loading };
 };
 
