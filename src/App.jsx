@@ -762,7 +762,7 @@ export default function App() {
             
             const sortedGenres = Array.from(genres).sort();
             setAvailableGenres(sortedGenres);
-            setCreatorStatus(`Found ${sortedGenres.length} unique genres. Select two or more to create a fusion playlist.`);
+            setCreatorStatus(`Found ${sortedGenres.length} unique genres. Select 1 to 3 genres to create a fusion playlist.`);
 
         } catch (e) {
             if (e.name === 'AbortError') {
@@ -778,8 +778,8 @@ export default function App() {
     }, [profile, token, fetchUniqueTrackUisAndArtistIdsFromPlaylists]);
 
     const handleCreateGenreFusionPlaylist = useCallback(async () => {
-        if (selectedGenres.length < 2) {
-            setCreatorError("Please select at least two genres to fuse.");
+        if (selectedGenres.length < 1 || selectedGenres.length > 3) {
+            setCreatorError("Please select between 1 and 3 genres to fuse.");
             return;
         }
         if (!genreFusionName.trim()) {
@@ -787,14 +787,19 @@ export default function App() {
             return;
         }
 
+        const controller = new AbortController();
+        setGenreFusionAbortController(controller);
+        const signal = controller.signal;
+
         setIsGenreFusionLoading(true);
         setCreatorError('');
         setCreatorStatus('Finding tracks for your genre fusion...');
         
         try {
-            const seed_genres = selectedGenres.slice(0, 5).join(','); // Spotify allows up to 5 seed values
+            const seed_genres = selectedGenres.join(',');
             const response = await fetch(`https://api.spotify.com/v1/recommendations?limit=50&seed_genres=${seed_genres}`, {
-                headers: { Authorization: `Bearer ${token}` }
+                headers: { Authorization: `Bearer ${token}` },
+                signal
             });
 
             if (!response.ok) {
@@ -816,14 +821,16 @@ export default function App() {
                     name: genreFusionName,
                     description: `A fusion of ${selectedGenres.join(', ')}. Created by your app.`,
                     public: false
-                })
+                }),
+                signal
             });
             const newPlaylist = await playlistResponse.json();
 
             await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ uris: trackUris })
+                body: JSON.stringify({ uris: trackUris }),
+                signal
             });
 
             setCreatedPlaylist(newPlaylist);
@@ -833,12 +840,21 @@ export default function App() {
             setGenreFusionName("");
 
         } catch (e) {
-            setCreatorError(e.message);
+            if (e.name === 'AbortError') {
+                setCreatorStatus("Genre fusion playlist creation cancelled.");
+            } else {
+                setCreatorError(e.message);
+            }
             console.error("Error creating genre fusion playlist:", e);
         } finally {
             setIsGenreFusionLoading(false);
+            setGenreFusionAbortController(null);
         }
     }, [profile, token, selectedGenres, genreFusionName, setLibraryVersion]);
+
+    const handleCancelGenreFusion = useCallback(() => {
+        genreFusionAbortController?.abort();
+    }, [genreFusionAbortController]);
 
     const logout = useCallback(() => {
         setToken(null);
@@ -980,7 +996,7 @@ export default function App() {
             isCustomLoading, customPlaylistName, setCustomPlaylistName, aiPrompt, setAiPrompt, handleCreateAiPlaylist, handleCancelAiPlaylist, resetCustomForm,
             isTopTracksLoading, topTracksProgress, handleCreateTopTracksPlaylist, handleCancelTopTracksPlaylist,
             isAllSongsLoading, allSongsProgress, handleCreateAllSongsPlaylist, handleCancelAllSongsPlaylist,
-            isGenreFusionLoading, genreFusionProgress, handleFetchAvailableGenres, handleCreateGenreFusionPlaylist, availableGenres, selectedGenres, setSelectedGenres, genreFusionName, setGenreFusionName,
+            isGenreFusionLoading, genreFusionProgress, handleFetchAvailableGenres, handleCreateGenreFusionPlaylist, handleCancelGenreFusion, availableGenres, selectedGenres, setSelectedGenres, genreFusionName, setGenreFusionName,
             getYesterdayDateParts // Pass getYesterdayDateParts to context
         }}>
             <div className="h-screen w-full flex flex-col bg-black text-white font-sans">
@@ -1529,7 +1545,7 @@ function PlaylistCreator() {
         isCustomLoading, customPlaylistName, setCustomPlaylistName, aiPrompt, setAiPrompt, handleCreateAiPlaylist, handleCancelAiPlaylist,
         isTopTracksLoading, topTracksProgress, handleCreateTopTracksPlaylist, handleCancelTopTracksPlaylist,
         isAllSongsLoading, allSongsProgress, handleCreateAllSongsPlaylist, handleCancelAllSongsPlaylist,
-        isGenreFusionLoading, genreFusionProgress, handleFetchAvailableGenres, handleCreateGenreFusionPlaylist, availableGenres, selectedGenres, setSelectedGenres, genreFusionName, setGenreFusionName,
+        isGenreFusionLoading, genreFusionProgress, handleFetchAvailableGenres, handleCreateGenreFusionPlaylist, handleCancelGenreFusion, availableGenres, selectedGenres, setSelectedGenres, genreFusionName, setGenreFusionName,
         getYesterdayDateParts,
         showCreatorStatus, setShowCreatorStatus, fadeCreatorStatusOut
     } = useContext(AppContext);
@@ -1539,7 +1555,7 @@ function PlaylistCreator() {
 
     const handleGenreSelect = (genre) => {
         setSelectedGenres(prev => 
-            prev.includes(genre) ? prev.filter(g => g !== genre) : [...prev, genre]
+            prev.includes(genre) ? prev.filter(g => g !== genre) : (prev.length < 3 ? [...prev, genre] : prev)
         );
     };
 
@@ -1568,7 +1584,7 @@ function PlaylistCreator() {
                 <div className="bg-gray-800 p-6 rounded-lg">
                     <h2 className="text-xl font-semibold mb-2">Genre Fusion Creator</h2>
                     <p className="text-gray-400 mb-4">
-                        Discover new music by blending genres from your library. Start by scanning for your available genres.
+                        Select 1 to 3 genres from your library to create a unique fusion playlist.
                     </p>
                     <button
                         onClick={handleFetchAvailableGenres}
@@ -1577,6 +1593,15 @@ function PlaylistCreator() {
                     >
                         {isGenreFusionLoading ? 'Scanning...' : "Scan My Library for Genres"}
                     </button>
+                    
+                    {isGenreFusionLoading && (
+                        <button
+                            onClick={handleCancelGenreFusion}
+                            className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
+                        >
+                            Cancel
+                        </button>
+                    )}
                     
                     {isGenreFusionLoading && (
                         <div className="mt-4">
@@ -1595,7 +1620,8 @@ function PlaylistCreator() {
                                     <button
                                         key={genre}
                                         onClick={() => handleGenreSelect(genre)}
-                                        className={`px-3 py-1 text-sm rounded-full transition-colors ${selectedGenres.includes(genre) ? 'bg-green-500 text-black' : 'bg-gray-700 hover:bg-gray-600'}`}
+                                        disabled={!selectedGenres.includes(genre) && selectedGenres.length >= 3}
+                                        className={`px-3 py-1 text-sm rounded-full transition-colors ${selectedGenres.includes(genre) ? 'bg-green-500 text-black' : 'bg-gray-700 hover:bg-gray-600'} ${!selectedGenres.includes(genre) && selectedGenres.length >= 3 ? 'opacity-50 cursor-not-allowed' : ''}`}
                                     >
                                         {genre}
                                     </button>
@@ -1612,11 +1638,19 @@ function PlaylistCreator() {
                                      </div>
                                      <button
                                         onClick={handleCreateGenreFusionPlaylist}
-                                        disabled={isAnyCurationLoading || selectedGenres.length < 2}
+                                        disabled={isAnyCurationLoading || selectedGenres.length < 1 || selectedGenres.length > 3}
                                         className="mt-4 bg-green-600 hover:bg-green-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
                                     >
-                                        Create Genre Fusion Playlist
+                                        {isGenreFusionLoading ? 'Creating...' : 'Create Genre Fusion Playlist'}
                                     </button>
+                                     {isGenreFusionLoading && (
+                                        <button
+                                            onClick={handleCancelGenreFusion}
+                                            className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
+                                        >
+                                            Cancel
+                                        </button>
+                                    )}
                                 </div>
                             )}
                         </div>
