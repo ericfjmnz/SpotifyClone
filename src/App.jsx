@@ -371,6 +371,7 @@ export default function App() {
             
             setCreatedPlaylist(newPlaylist);
             setCreatorStatus('WQXR playlist created successfully!');
+            localStorage.removeItem('/me/playlists?limit=50');
             setLibraryVersion(v => v + 1);
         
         } catch (e) {
@@ -518,6 +519,7 @@ export default function App() {
     
             setCreatedPlaylist(newPlaylist);
             setCreatorStatus('AI-powered playlist created successfully!');
+            localStorage.removeItem('/me/playlists?limit=50');
             setLibraryVersion(v => v + 1);
             resetCustomForm();
     
@@ -600,6 +602,7 @@ export default function App() {
 
             setCreatedPlaylist(newPlaylist);
             setCreatorStatus('Top 100 tracks playlist created successfully!');
+            localStorage.removeItem('/me/playlists?limit=50');
             setLibraryVersion(v => v + 1);
         } catch (e) {
             if (e.name === 'AbortError') {
@@ -695,6 +698,7 @@ export default function App() {
             setAllSongsProgress(100); // Final progress update
             setCreatedPlaylist(createdPlaylistsInfo[0]);
             setCreatorStatus(`Successfully created ${numberOfPlaylists} playlist(s)!`);
+            localStorage.removeItem('/me/playlists?limit=50');
             setLibraryVersion(v => v + 1);
 
         } catch (e) {
@@ -886,6 +890,7 @@ export default function App() {
     
             setCreatedPlaylist(newPlaylist);
             setCreatorStatus("Genre Fusion playlist created successfully!");
+            localStorage.removeItem('/me/playlists?limit=50');
             setLibraryVersion(v => v + 1);
             setSelectedGenres([]);
             setGenreFusionName("");
@@ -1058,8 +1063,8 @@ export default function App() {
 
 function Sidebar() {
     const { view, setView, selectedPlaylistId, setSelectedPlaylistId, logout, libraryVersion, profile, setPlaylistToEdit, setPlaylistToDelete } = useContext(AppContext);
-    // Modified useSpotifyApi call to trigger re-fetch when libraryVersion changes
-    const { data: playlists, loading: playlistsLoading } = useSpotifyApi(`/me/playlists?limit=50&v=${libraryVersion}`);
+    // Use the static URL and pass libraryVersion as a dependency
+    const { data: playlists, loading: playlistsLoading } = useSpotifyApi('/me/playlists?limit=50', [libraryVersion]);
     const [activeMenu, setActiveMenu] = useState(null);
     
     const NavItem = ({ label, targetView, icon }) => (
@@ -1281,7 +1286,7 @@ function PlayerBar() {
 
 // --- API Fetch Hook ---
 // A custom hook to simplify making authenticated requests to the Spotify API.
-const useSpotifyApi = (url) => {
+const useSpotifyApi = (url, deps = []) => { // Add deps array
     const { spotifyFetch } = useContext(AppContext);
     const [data, setData] = useState(null);
     const [error, setError] = useState(null);
@@ -1306,10 +1311,10 @@ const useSpotifyApi = (url) => {
                         if (isMounted) {
                             setData(storedData);
                             setLoading(false);
-                            return; 
+                            return; // Return from cache, no API call needed
                         }
                     } else {
-                        localStorage.removeItem(url); 
+                        localStorage.removeItem(url); // Clear expired cache
                     }
                 }
             } catch (cacheError) {
@@ -1317,14 +1322,13 @@ const useSpotifyApi = (url) => {
             }
             // --- End Cache Read Attempt ---
 
-
             if (isMounted) setLoading(true);
 
             try {
                 const response = await spotifyFetch(url);
-                 if (!response.ok) {
+                if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
-                 }
+                }
                 const result = await response.json();
                 
                 // --- Cache Write Attempt ---
@@ -1355,7 +1359,7 @@ const useSpotifyApi = (url) => {
         return () => {
             isMounted = false;
         };
-    }, [url, spotifyFetch]);
+    }, [spotifyFetch, url, ...deps]); // Use spread operator for deps
     return { data, error, loading };
 };
 
@@ -1451,8 +1455,8 @@ function HomePage() {
 }
 
 function PlaylistView({ playlistId }) {
-    const { data: playlist, loading } = useSpotifyApi(`/playlists/${playlistId}`);
-    const { spotifyFetch, deviceId, currentTrack, isPaused, setView, setSelectedPlaylistId } = useContext(AppContext);
+    const { spotifyFetch, deviceId, currentTrack, isPaused, setView, setSelectedPlaylistId, libraryVersion } = useContext(AppContext);
+    const { data: playlist, loading } = useSpotifyApi(`/playlists/${playlistId}`, [libraryVersion]);
     const [error, setError] = useState(null);
 
     const playTrack = async (trackUri) => {
@@ -1928,6 +1932,8 @@ function EditPlaylistModal({ playlist, onClose }) {
                 const errorData = await response.json();
                 throw new Error(errorData.error.message || 'Failed to update playlist.');
             }
+            localStorage.removeItem('/me/playlists?limit=50');
+            localStorage.removeItem(`/playlists/${playlist.id}`);
             setLibraryVersion(v => v + 1);
             onClose();
         } catch (error) {
@@ -1986,6 +1992,7 @@ function DeleteConfirmationModal({ playlist, onClose }) {
                 const errorData = await response.json();
                 throw new Error(errorData.error.message || 'Failed to delete playlist.');
             }
+            localStorage.removeItem('/me/playlists?limit=50');
             setLibraryVersion(v => v + 1);
             setSelectedPlaylistId(null);
             setView('home');
