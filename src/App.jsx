@@ -231,12 +231,13 @@ export default function App() {
         setAiPrompt('');
     }, []);
 
-    // Helper function to introduce a delay
+    // Helper function to introduce a delay (moved outside of component/hooks)
     const delay = (ms) => new Promise(res => setTimeout(res, ms));
 
 
     // NEW: Custom hook for data fetching helpers
     const useSpotifyDataHelpers = (token) => {
+        // fetchUniqueTrackUrisAndArtistIdsFromPlaylists is now directly defined here
         const fetchUniqueTrackUrisAndArtistIdsFromPlaylists = useCallback(async (signal) => {
             let allPlaylists = [];
             let nextPlaylistsUrl = 'https://api.spotify.com/v1/me/playlists?limit=50'; 
@@ -672,7 +673,7 @@ export default function App() {
             setAllSongsProgress(0);
             setAllSongsAbortController(null); // Clear controller reference
         }
-    }, [profile, token, setLibraryVersion, fetchUniqueTrackUrisAndArtistIdsFromPlaylists]);
+    }, [profile, token, setLibraryVersion, fetchUniqueTrackUisAndArtistIdsFromPlaylists]);
 
     const handleCancelAllSongsPlaylist = useCallback(() => {
         allSongsAbortController?.abort();
@@ -697,7 +698,7 @@ export default function App() {
             // Phase 1: Collect unique track URIs and artist IDs
             const { uniqueTrackUris, uniqueArtistIds } = await fetchUniqueTrackUisAndArtistIdsFromPlaylists(signal);
             
-            if (uniqueTrackUris.length === 0) {
+            if (uniqueTrackUis.length === 0) {
                 throw new Error('Could not find any unique songs across your playlists to determine genres.');
             }
 
