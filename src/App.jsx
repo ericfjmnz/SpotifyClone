@@ -172,6 +172,415 @@ export default function App() {
     const [playlistToEdit, setPlaylistToEdit] = useState(null);
     const [playlistToDelete, setPlaylistToDelete] = useState(null);
 
+    // --- Playlist Creator states (LIFTED from PlaylistCreator) ---
+    const [creatorStatus, setCreatorStatus] = useState('');
+    const [creatorError, setCreatorError] = useState('');
+    const [createdPlaylist, setCreatedPlaylist] = useState(null); // Can be used to show link to newly created playlist
+
+    const [isWqxrLoading, setIsWqxrLoading] = useState(false);
+    const [wqxrProgress, setWqxrProgress] = useState(0);
+
+    const [isCustomLoading, setIsCustomLoading] = useState(false);
+    const [customPlaylistName, setCustomPlaylistName] = useState('');
+    const [aiPrompt, setAiPrompt] = useState("");
+
+    const [isTopTracksLoading, setIsTopTracksLoading] = useState(false);
+    const [topTracksProgress, setTopTracksProgress] = useState(0); 
+
+    const [isAllSongsLoading, setIsAllSongsLoading] = useState(false);
+    const [allSongsProgress, setAllSongsProgress] = useState(0);
+
+    const getYesterdayDateParts = useCallback(() => {
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const year = yesterday.getFullYear();
+        const month = yesterday.toLocaleString('default', { month: 'short' }).toLowerCase();
+        const day = String(yesterday.getDate()).padStart(2, '0');
+        return { year, month, day };
+    }, []);
+
+    const resetCustomForm = useCallback(() => {
+        setCustomPlaylistName('');
+        setAiPrompt('');
+    }, []);
+
+    const handleCreateWQXRPlaylist = useCallback(async () => {
+        if(!profile) {
+            setCreatorError('Could not get user profile. Please try again.');
+            return;
+        }
+        setIsWqxrLoading(true);
+        setCreatorError('');
+        setCreatedPlaylist(null);
+        setWqxrProgress(0);
+        setCreatorStatus('Requesting playlist from proxy server...');
+
+        try {
+            const { year, month, day } = getYesterdayDateParts();
+            const proxyResponse = await fetch(`http://localhost:3001/wqxr-playlist?year=${year}&month=${month}&day=${day}`);
+            
+            if (!proxyResponse.ok) throw new Error('Failed to fetch data from proxy server. Make sure it is running.');
+    
+            const data = await proxyResponse.json();
+            const wqxrTracks = data.tracks;
+    
+            if (!wqxrTracks || wqxrTracks.length === 0) throw new Error('Could not parse any tracks from the WQXR playlist.');
+            
+            setCreatorStatus(`Found ${wqxrTracks.length} tracks from WQXR. Searching on Spotify...`);
+            
+            const trackUris = [];
+            for (const [index, track] of wqxrTracks.entries()) {
+                const query = encodeURIComponent(`track:${track.title} artist:${track.composer}`);
+                const response = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+                const searchData = await response.json();
+                if (searchData.tracks.items.length > 0) {
+                    trackUris.push(searchData.tracks.items[0].uri);
+                }
+                const progress = ((index + 1) / wqxrTracks.length) * 100;
+                setWqxrProgress(progress);
+            }
+    
+            if (trackUris.length === 0) throw new Error('Could not find any of the WQXR tracks on Spotify.');
+            
+            setCreatorStatus('Creating new WQXR playlist...');
+            const playlistName = `WQXR Daily - ${year}-${month}-${day}`; // Use the destructured values
+            const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`},
+                body: JSON.stringify({ name: playlistName, description: `A playlist of songs from WQXR on ${year}-${month}-${day}.`, public: false }) // Use destructured values
+            });
+            const newPlaylist = await playlistResponse.json();
+    
+            setCreatorStatus('Adding tracks to the new WQXR playlist...');
+            await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ uris: trackUris })
+            });
+            
+            setCreatedPlaylist(newPlaylist);
+            setCreatorStatus('WQXR playlist created successfully!');
+            setLibraryVersion(v => v + 1);
+        
+        } catch (e) {
+            setCreatorError(e.message);
+            setCreatorStatus('');
+            console.error(e);
+        } finally {
+            setIsWqxrLoading(false);
+            setWqxrProgress(0); 
+        }
+    }, [profile, token, getYesterdayDateParts, setLibraryVersion]);
+
+
+    const handleCreateAiPlaylist = useCallback(async () => {
+        setCreatorError('');
+        setCreatorStatus('');
+        setCreatedPlaylist(null);
+        if (!customPlaylistName.trim()) {
+            setCreatorError('Playlist name cannot be empty.');
+            return;
+        }
+        if (!aiPrompt.trim()) {
+            setCreatorError('Please describe the kind of playlist you want.');
+            return;
+        }
+        if(!profile) {
+            setCreatorError('Could not get user profile. Please try again.');
+            return;
+        }
+
+        setIsCustomLoading(true);
+        setCreatorStatus('Asking AI for song ideas... This may take a moment.');
+
+        try {
+            const geminiPrompt = `Based on the following theme: "${aiPrompt}", generate a list of 90 suitable songs. Include a mix of popular and less common tracks if possible.`;
+            let chatHistory = [{ role: "user", parts: [{ text: geminiPrompt }] }];
+            const payload = {
+                contents: chatHistory,
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: "OBJECT",
+                        properties: {
+                            "songs": {
+                                type: "ARRAY",
+                                items: {
+                                    type: "OBJECT",
+                                    properties: {
+                                        "track": { "type": "STRING" },
+                                        "artist": { "type": "STRING" }
+                                    },
+                                    required: ["track", "artist"]
+                                }
+                            }
+                        },
+                         required: ["songs"]
+                    }
+                }
+            };
+            
+            const apiKey = "AIzaSyAsb7lrYNWBzSIUe5RUCOCMib20FzAX61M"; 
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+            const geminiResponse = await fetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            
+            if(!geminiResponse.ok) {
+                const errorBody = await geminiResponse.text();
+                throw new Error(`AI request failed: ${geminiResponse.status}. ${errorBody}`);
+            }
+
+            const result = await geminiResponse.json();
+            
+            if (!result.candidates || result.candidates.length === 0) {
+                 throw new Error("AI response was empty or invalid. Please try a different prompt.");
+            }
+
+            const songsText = result.candidates[0].content.parts[0].text;
+            const aiSuggestions = JSON.parse(songsText).songs;
+
+            if (!aiSuggestions || aiSuggestions.length === 0) {
+                 throw new Error('The AI could not suggest any songs for this theme. Please try a different prompt.');
+            }
+
+            setCreatorStatus('Searching for suggested songs on Spotify...');
+            const trackUris = [];
+            await Promise.all(aiSuggestions.map(async (song) => {
+                const query = encodeURIComponent(`track:${song.track} artist:${song.artist}`);
+                const searchResponse = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+                const searchData = await searchResponse.json();
+                if (searchData.tracks.items.length > 0) {
+                    trackUris.push(searchData.tracks.items[0].uri);
+                }
+            }));
+
+            if (trackUris.length === 0) {
+                throw new Error('Could not find any of the AI-suggested songs on Spotify. The AI might be hallucinating!');
+            }
+
+            setCreatorStatus(`Creating playlist "${customPlaylistName}"...`);
+            const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ name: customPlaylistName, description: `AI-generated playlist based on the prompt: "${aiPrompt}"`, public: false })
+            });
+            const newPlaylist = await playlistResponse.json();
+
+            setCreatorStatus(`Adding ${trackUris.length} songs...`);
+            await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ uris: trackUris })
+            });
+
+            setCreatedPlaylist(newPlaylist);
+            setCreatorStatus('AI-powered playlist created successfully!');
+            setLibraryVersion(v => v + 1);
+            resetCustomForm();
+
+        } catch (e) {
+            setCreatorError(`An error occurred: ${e.message}`);
+            console.error(e);
+            setCreatorStatus('');
+        } finally {
+            setIsCustomLoading(false);
+        }
+    }, [profile, token, customPlaylistName, aiPrompt, setLibraryVersion, resetCustomForm]);
+
+    const handleCreateTopTracksPlaylist = useCallback(async () => {
+        if (!profile) {
+            setCreatorError('Could not get user profile. Please try again.');
+            return;
+        }
+        setIsTopTracksLoading(true);
+        setCreatorError('');
+        setCreatedPlaylist(null);
+        setTopTracksProgress(0);
+        setCreatorStatus('Fetching your top tracks from Spotify...');
+
+        try {
+            const response = await fetch(`https://api.spotify.com/v1/me/top/tracks?limit=50`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            if (!response.ok) {
+                throw new Error(`Failed to fetch top tracks: ${response.status}`);
+            }
+            const data = await response.json();
+            const topTracks = data.items;
+
+            if (!topTracks || topTracks.length === 0) {
+                throw new Error('Could not find any top tracks. Listen to more music on Spotify!');
+            }
+
+            const trackUris = topTracks.map(track => track.uri);
+
+            setCreatorStatus(`Found ${trackUris.length} top tracks. Creating playlist...`);
+            const playlistName = `My Top Tracks - ${new Date().toLocaleDateString()}`;
+            const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ name: playlistName, description: 'A playlist generated from your top Spotify tracks.', public: false })
+            });
+            const newPlaylist = await playlistResponse.json();
+
+            setCreatorStatus('Adding tracks to your new top tracks playlist...');
+            await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ uris: trackUris })
+            });
+
+            setCreatedPlaylist(newPlaylist);
+            setCreatorStatus('Top tracks playlist created successfully!');
+            setLibraryVersion(v => v + 1);
+        } catch (e) {
+            setCreatorError(e.message);
+            setCreatorStatus('');
+            console.error(e);
+        } finally {
+            setIsTopTracksLoading(false);
+            setTopTracksProgress(0);
+        }
+    }, [profile, token, setLibraryVersion]);
+
+    const handleCreateAllSongsPlaylist = useCallback(async () => {
+        if (!profile) {
+            setCreatorError('Could not get user profile. Please try again.');
+            return;
+        }
+        setIsAllSongsLoading(true);
+        setCreatorError('');
+        setCreatedPlaylist(null);
+        setAllSongsProgress(0);
+        setCreatorStatus('Fetching all your playlists. This may take a while...');
+
+        try {
+            let allPlaylists = [];
+            let nextPlaylistsUrl = 'https://api.spotify.com/v1/me/playlists?limit=50'; 
+
+            while (nextPlaylistsUrl) {
+                const response = await fetch(nextPlaylistsUrl, { 
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch playlists: ${response.status}`);
+                }
+                const data = await response.json();
+                allPlaylists = allPlaylists.concat(data.items);
+                nextPlaylistsUrl = data.next; 
+            }
+
+            if (allPlaylists.length === 0) {
+                throw new Error('You have no playlists in your Spotify library.');
+            }
+            
+            setCreatorStatus(`Found ${allPlaylists.length} playlists. Fetching tracks from each playlist...`);
+
+            const uniqueTrackUris = new Set();
+            let processedPlaylistsCount = 0;
+
+            for (const playlist of allPlaylists) {
+                let nextTracksUrl = `https://api.spotify.com/v1/playlists/${playlist.id}/tracks?limit=100`;
+                while (nextTracksUrl) {
+                    const response = await fetch(nextTracksUrl, { 
+                        headers: { Authorization: `Bearer ${token}` }
+                    });
+                    if (!response.ok) {
+                        console.warn(`Failed to fetch tracks for playlist "${playlist.name}" (${playlist.id}): ${response.status}`);
+                        break; 
+                    }
+                    const data = await response.json();
+                    if (data.items) { 
+                        data.items.forEach(item => {
+                            if (item.track && typeof item.track.uri === 'string' && item.track.uri.startsWith('spotify:track:')) {
+                                uniqueTrackUris.add(item.track.uri);
+                            } else {
+                                console.warn(`Skipping invalid track URI from playlist "${playlist.name}":`, item.track);
+                            }
+                        });
+                    }
+                    nextTracksUrl = data.next; 
+                }
+                processedPlaylistsCount++;
+                setAllSongsProgress((processedPlaylistsCount / allPlaylists.length) * 100);
+                setCreatorStatus(`Processed ${processedPlaylistsCount} of ${allPlaylists.length} playlists. Found ${uniqueTrackUris.size} unique songs.`);
+            }
+
+            const trackUrisArray = Array.from(uniqueTrackUris);
+
+            if (trackUrisArray.length === 0) {
+                throw new Error('Could not find any unique songs across your playlists.');
+            }
+
+            const SPOTIFY_PLAYLIST_LIMIT = 10000; // Spotify's maximum playlist size
+            const totalSongs = trackUrisArray.length;
+            const numberOfPlaylists = Math.ceil(totalSongs / SPOTIFY_PLAYLIST_LIMIT);
+            const createdPlaylistsInfo = [];
+
+            for (let p = 0; p < numberOfPlaylists; p++) {
+                const startIdx = p * SPOTIFY_PLAYLIST_LIMIT;
+                const endIdx = Math.min(startIdx + SPOTIFY_PLAYLIST_LIMIT, totalSongs);
+                const currentChunkOfTracks = trackUrisArray.slice(startIdx, endIdx);
+                
+                const playlistName = `All My Playlists Songs - Part ${p + 1} - ${new Date().toLocaleDateString()}`;
+                const description = `Part ${p + 1} of a playlist containing all unique songs from your Spotify playlists.`;
+
+                setCreatorStatus(`Creating playlist "${playlistName}" (${p + 1}/${numberOfPlaylists})...`);
+                const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                    body: JSON.stringify({ name: playlistName, description: description, public: false })
+                });
+
+                if (!playlistResponse.ok) {
+                    const errorBody = await playlistResponse.json();
+                    throw new Error(`Failed to create playlist "${playlistName}": ${playlistResponse.status} - ${errorBody.error?.message || 'Unknown error'}`);
+                }
+                const newPlaylist = await playlistResponse.json();
+                createdPlaylistsInfo.push(newPlaylist);
+
+                setCreatorStatus(`Adding ${currentChunkOfTracks.length} songs to "${newPlaylist.name}"...`);
+                const chunkSizeForAdding = 100;
+                for (let i = 0; i < currentChunkOfTracks.length; i += chunkSizeForAdding) {
+                    const chunk = currentChunkOfTracks.slice(i, i + chunkSizeForAdding);
+                    const addTracksResponse = await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                        body: JSON.stringify({ uris: chunk })
+                    });
+
+                    if (!addTracksResponse.ok) {
+                        const errorBody = await addTracksResponse.json();
+                        console.error(`Error adding tracks chunk to playlist ${newPlaylist.name}:`, errorBody);
+                        throw new Error(`Failed to add tracks to playlist "${newPlaylist.name}": ${addTracksResponse.status} - ${errorBody.error?.message || 'Unknown error'}`);
+                    }
+                    const overallProgress = ((startIdx + i + chunk.length) / totalSongs) * 100;
+                    setAllSongsProgress(overallProgress);
+                }
+            }
+            
+            setCreatedPlaylist(createdPlaylistsInfo[0]); 
+            setCreatorStatus(`Successfully created ${numberOfPlaylists} playlist(s)!`);
+            setLibraryVersion(v => v + 1); 
+
+        } catch (e) {
+            setCreatorError(e.message);
+            setCreatorStatus('');
+            console.error("Error creating all songs from playlists:", e);
+        } finally {
+            setIsAllSongsLoading(false);
+            setAllSongsProgress(0);
+        }
+    }, [profile, token, setLibraryVersion]);
+
+
 
     const logout = useCallback(() => {
         setToken(null);
@@ -306,7 +715,14 @@ export default function App() {
     }
 
     return (
-        <AppContext.Provider value={{ token, view, setView, selectedPlaylistId, setSelectedPlaylistId, player, isPlayerReady, currentTrack, isPaused, logout, deviceId, position, libraryVersion, setLibraryVersion, profile, setProfile, setPlaylistToEdit, setPlaylistToDelete }}>
+        <AppContext.Provider value={{ token, view, setView, selectedPlaylistId, setSelectedPlaylistId, player, isPlayerReady, currentTrack, isPaused, logout, deviceId, position, libraryVersion, setLibraryVersion, profile, setProfile, setPlaylistToEdit, setPlaylistToDelete,
+            // Playlist Creator states and functions passed via context
+            creatorStatus, creatorError, createdPlaylist,
+            isWqxrLoading, wqxrProgress, handleCreateWQXRPlaylist,
+            isCustomLoading, customPlaylistName, setCustomPlaylistName, aiPrompt, setAiPrompt, handleCreateAiPlaylist, resetCustomForm,
+            isTopTracksLoading, topTracksProgress, handleCreateTopTracksPlaylist,
+            isAllSongsLoading, allSongsProgress, handleCreateAllSongsPlaylist
+        }}>
             <div className="h-screen w-full flex flex-col bg-black text-white font-sans">
                 <div className="flex flex-1 overflow-y-hidden">
                     <Sidebar />
@@ -774,434 +1190,38 @@ function PlaylistView({ playlistId }) {
 }
 
 function PlaylistCreator() {
-    const { token, setLibraryVersion, profile } = useContext(AppContext);
-    const [status, setStatus] = useState('');
-    const [error, setError] = useState('');
-    const [createdPlaylist, setCreatedPlaylist] = useState(null);
-    const [isWqxrLoading, setIsWqxrLoading] = useState(false);
-    const [wqxrProgress, setWqxrProgress] = useState(0); // New state for progress
-    const [isCustomLoading, setIsCustomLoading] = useState(false);
-    // New states for Top Tracks Playlist
-    const [isTopTracksLoading, setIsTopTracksLoading] = useState(false);
-    const [topTracksProgress, setTopTracksProgress] = useState(0); 
-    // New states for All Songs Playlist
-    const [isAllSongsLoading, setIsAllSongsLoading] = useState(false);
-    const [allSongsProgress, setAllSongsProgress] = useState(0);
+    const { 
+        token, setLibraryVersion, profile,
+        creatorStatus, creatorError, createdPlaylist,
+        isWqxrLoading, wqxrProgress, handleCreateWQXRPlaylist,
+        isCustomLoading, customPlaylistName, setCustomPlaylistName, aiPrompt, setAiPrompt, handleCreateAiPlaylist, resetCustomForm,
+        isTopTracksLoading, topTracksProgress, handleCreateTopTracksPlaylist,
+        isAllSongsLoading, allSongsProgress, handleCreateAllSongsPlaylist,
+        getYesterdayDateParts // Destructure getYesterdayDateParts from context
+    } = useContext(AppContext);
 
-    // State for Custom Playlist
-    const [customPlaylistName, setCustomPlaylistName] = useState('');
-    const [aiPrompt, setAiPrompt] = useState("");
+    // Determine if any curation is currently running to disable buttons
+    const isAnyCurationLoading = isWqxrLoading || isCustomLoading || isTopTracksLoading || isAllSongsLoading;
 
-    const getYesterdayDateParts = () => {
-        const yesterday = new Date();
-        yesterday.setDate(yesterday.getDate() - 1);
-        const year = yesterday.getFullYear();
-        const month = yesterday.toLocaleString('default', { month: 'short' }).toLowerCase();
-        const day = String(yesterday.getDate()).padStart(2, '0');
-        return { year, month, day };
-    };
-
+    // Call getYesterdayDateParts here to get the values for rendering
     const { year: yesterdayYear, month: yesterdayMonth, day: yesterdayDay } = getYesterdayDateParts();
-
-    const handleCreateWQXRPlaylist = async () => {
-        if(!profile) {
-            setError('Could not get user profile. Please try again.');
-            return;
-        }
-        setIsWqxrLoading(true);
-        setError('');
-        setCreatedPlaylist(null);
-        setWqxrProgress(0);
-        setStatus('Requesting playlist from proxy server...');
-
-        try {
-            const { year, month, day } = getYesterdayDateParts();
-            // NOTE: This fetch requires a local proxy to bypass CORS.
-            const proxyResponse = await fetch(`http://localhost:3001/wqxr-playlist?year=${year}&month=${month}&day=${day}`);
-            
-            if (!proxyResponse.ok) throw new Error('Failed to fetch data from proxy server. Make sure it is running.');
-    
-            const data = await proxyResponse.json();
-            const wqxrTracks = data.tracks;
-    
-            if (!wqxrTracks || wqxrTracks.length === 0) throw new Error('Could not parse any tracks from the WQXR playlist.');
-            
-            setStatus(`Found ${wqxrTracks.length} tracks from WQXR. Searching on Spotify...`);
-            
-            const trackUris = [];
-            for (const [index, track] of wqxrTracks.entries()) {
-                const query = encodeURIComponent(`track:${track.title} artist:${track.composer}`);
-                const response = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, {
-                    headers: { Authorization: `Bearer ${token}` }
-                });
-                const searchData = await response.json();
-                if (searchData.tracks.items.length > 0) {
-                    trackUris.push(searchData.tracks.items[0].uri);
-                }
-                // Update progress after each track is processed
-                const progress = ((index + 1) / wqxrTracks.length) * 100;
-                setWqxrProgress(progress);
-            }
-    
-            if (trackUris.length === 0) throw new Error('Could not find any of the WQXR tracks on Spotify.');
-            
-            setStatus('Creating new WQXR playlist...');
-            const playlistName = `WQXR Daily - ${yesterdayYear}-${yesterdayMonth}-${yesterdayDay}`;
-            const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`},
-                body: JSON.stringify({ name: playlistName, description: `A playlist of songs from WQXR on ${yesterdayYear}-${yesterdayMonth}-${yesterdayDay}.`, public: false })
-            });
-            const newPlaylist = await playlistResponse.json();
-    
-            setStatus('Adding tracks to the new WQXR playlist...');
-            await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ uris: trackUris })
-            });
-            
-            setCreatedPlaylist(newPlaylist);
-            setStatus('WQXR playlist created successfully!');
-            setLibraryVersion(v => v + 1);
-        
-        } catch (e) {
-            setError(e.message);
-            setStatus('');
-            console.error(e);
-        } finally {
-            setIsWqxrLoading(false);
-            setWqxrProgress(0); // Reset progress on completion or error
-        }
-    };
-    
-    const resetCustomForm = () => {
-        setCustomPlaylistName('');
-        setAiPrompt('');
-    };
-
-    const handleCreateAiPlaylist = async () => {
-        setError('');
-        setStatus('');
-        setCreatedPlaylist(null);
-        if (!customPlaylistName.trim()) {
-            setError('Playlist name cannot be empty.');
-            return;
-        }
-        if (!aiPrompt.trim()) {
-            setError('Please describe the kind of playlist you want.');
-            return;
-        }
-        if(!profile) {
-            setError('Could not get user profile. Please try again.');
-            return;
-        }
-
-        setIsCustomLoading(true);
-        setStatus('Asking AI for song ideas... This may take a moment.');
-
-        try {
-            const geminiPrompt = `Based on the following theme: "${aiPrompt}", generate a list of 90 suitable songs. Include a mix of popular and less common tracks if possible.`;
-            let chatHistory = [{ role: "user", parts: [{ text: geminiPrompt }] }];
-            const payload = {
-                contents: chatHistory,
-                generationConfig: {
-                    responseMimeType: "application/json",
-                    responseSchema: {
-                        type: "OBJECT",
-                        properties: {
-                            "songs": {
-                                type: "ARRAY",
-                                items: {
-                                    type: "OBJECT",
-                                    properties: {
-                                        "track": { "type": "STRING" },
-                                        "artist": { "type": "STRING" }
-                                    },
-                                    required: ["track", "artist"]
-                                }
-                            }
-                        },
-                         required: ["songs"]
-                    }
-                }
-            };
-            
-            // The API key is left as "" and will be handled by the environment.
-            // This is the secure way to handle API calls from the client-side.
-            const apiKey = "AIzaSyAsb7lrYNWBzSIUe5RUCOCMib20FzAX61M"; 
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-            const geminiResponse = await fetch(apiUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            
-            if(!geminiResponse.ok) {
-                const errorBody = await geminiResponse.text();
-                throw new Error(`AI request failed: ${geminiResponse.status}. ${errorBody}`);
-            }
-
-            const result = await geminiResponse.json();
-            
-            if (!result.candidates || result.candidates.length === 0) {
-                 throw new Error("AI response was empty or invalid. Please try a different prompt.");
-            }
-
-            const songsText = result.candidates[0].content.parts[0].text;
-            const aiSuggestions = JSON.parse(songsText).songs;
-
-            if (!aiSuggestions || aiSuggestions.length === 0) {
-                 throw new Error('The AI could not suggest any songs for this theme. Please try a different prompt.');
-            }
-
-            setStatus('Searching for suggested songs on Spotify...');
-            const trackUris = [];
-            // Use Promise.all for parallel search requests to speed up the process.
-            await Promise.all(aiSuggestions.map(async (song) => {
-                const query = encodeURIComponent(`track:${song.track} artist:${song.artist}`);
-                const searchResponse = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, {
-                    headers: { Authorization: `Bearer ${token}` }
-                });
-                const searchData = await searchResponse.json();
-                if (searchData.tracks.items.length > 0) {
-                    trackUris.push(searchData.tracks.items[0].uri);
-                }
-            }));
-
-            if (trackUris.length === 0) {
-                throw new Error('Could not find any of the AI-suggested songs on Spotify. The AI might be hallucinating!');
-            }
-
-            setStatus(`Creating playlist "${customPlaylistName}"...`);
-            const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ name: customPlaylistName, description: `AI-generated playlist based on the prompt: "${aiPrompt}"`, public: false })
-            });
-            const newPlaylist = await playlistResponse.json();
-
-            setStatus(`Adding ${trackUris.length} songs...`);
-            // Spotify API can only handle 100 tracks at a time, so chunk if necessary (though we request 20).
-            await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ uris: trackUris })
-            });
-
-            setCreatedPlaylist(newPlaylist);
-            setStatus('AI-powered playlist created successfully!');
-            setLibraryVersion(v => v + 1);
-            resetCustomForm();
-
-        } catch (e) {
-            setError(`An error occurred: ${e.message}`);
-            console.error(e);
-            setStatus('');
-        } finally {
-            setIsCustomLoading(false);
-        }
-    };
-
-    // New function for creating playlist from top tracks
-    const handleCreateTopTracksPlaylist = async () => {
-        if (!profile) {
-            setError('Could not get user profile. Please try again.');
-            return;
-        }
-        setIsTopTracksLoading(true);
-        setError('');
-        setCreatedPlaylist(null);
-        setTopTracksProgress(0);
-        setStatus('Fetching your top tracks from Spotify...');
-
-        try {
-            // Fetch top tracks (Spotify API supports limit up to 50 for top tracks)
-            const response = await fetch(`https://api.spotify.com/v1/me/top/tracks?limit=50`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            if (!response.ok) {
-                throw new Error(`Failed to fetch top tracks: ${response.status}`);
-            }
-            const data = await response.json();
-            const topTracks = data.items;
-
-            if (!topTracks || topTracks.length === 0) {
-                throw new Error('Could not find any top tracks. Listen to more music on Spotify!');
-            }
-
-            const trackUris = topTracks.map(track => track.uri);
-
-            setStatus(`Found ${trackUris.length} top tracks. Creating playlist...`);
-            const playlistName = `My Top Tracks - ${new Date().toLocaleDateString()}`;
-            const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ name: playlistName, description: 'A playlist generated from your top Spotify tracks.', public: false })
-            });
-            const newPlaylist = await playlistResponse.json();
-
-            setStatus('Adding tracks to your new top tracks playlist...');
-            // Spotify API can add up to 100 tracks at a time
-            await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ uris: trackUris })
-            });
-
-            setCreatedPlaylist(newPlaylist);
-            setStatus('Top tracks playlist created successfully!');
-            setLibraryVersion(v => v + 1); // Trigger a refresh of the sidebar playlists
-        } catch (e) {
-            setError(e.message);
-            setStatus('');
-            console.error(e);
-        } finally {
-            setIsTopTracksLoading(false);
-            setTopTracksProgress(0);
-        }
-    };
-
-    // Function to create a playlist with all songs from all user's playlists
-    const handleCreateAllSongsPlaylist = async () => {
-        if (!profile) {
-            setError('Could not get user profile. Please try again.');
-            return;
-        }
-        setIsAllSongsLoading(true);
-        setError('');
-        setCreatedPlaylist(null);
-        setAllSongsProgress(0);
-        setStatus('Fetching all your playlists. This may take a while...');
-
-        try {
-            let allPlaylists = [];
-            let nextPlaylistsUrl = 'https://api.spotify.com/v1/me/playlists?limit=50'; 
-
-            while (nextPlaylistsUrl) {
-                const response = await fetch(nextPlaylistsUrl, { 
-                    headers: { Authorization: `Bearer ${token}` }
-                });
-                if (!response.ok) {
-                    throw new Error(`Failed to fetch playlists: ${response.status}`);
-                }
-                const data = await response.json();
-                allPlaylists = allPlaylists.concat(data.items);
-                nextPlaylistsUrl = data.next; 
-            }
-
-            if (allPlaylists.length === 0) {
-                throw new Error('You have no playlists in your Spotify library.');
-            }
-            
-            setStatus(`Found ${allPlaylists.length} playlists. Fetching tracks from each playlist...`);
-
-            const uniqueTrackUris = new Set();
-            let processedPlaylistsCount = 0;
-
-            for (const playlist of allPlaylists) {
-                let nextTracksUrl = `https://api.spotify.com/v1/playlists/${playlist.id}/tracks?limit=100`;
-                while (nextTracksUrl) {
-                    const response = await fetch(nextTracksUrl, { 
-                        headers: { Authorization: `Bearer ${token}` }
-                    });
-                    if (!response.ok) {
-                        console.warn(`Failed to fetch tracks for playlist "${playlist.name}" (${playlist.id}): ${response.status}`);
-                        break; 
-                    }
-                    const data = await response.json();
-                    if (data.items) { 
-                        data.items.forEach(item => {
-                            if (item.track && typeof item.track.uri === 'string' && item.track.uri.startsWith('spotify:track:')) {
-                                uniqueTrackUris.add(item.track.uri);
-                            } else {
-                                console.warn(`Skipping invalid track URI from playlist "${playlist.name}":`, item.track);
-                            }
-                        });
-                    }
-                    nextTracksUrl = data.next; 
-                }
-                processedPlaylistsCount++;
-                setAllSongsProgress((processedPlaylistsCount / allPlaylists.length) * 100);
-                setStatus(`Processed ${processedPlaylistsCount} of ${allPlaylists.length} playlists. Found ${uniqueTrackUris.size} unique songs.`);
-            }
-
-            const trackUrisArray = Array.from(uniqueTrackUris);
-
-            if (trackUrisArray.length === 0) {
-                throw new Error('Could not find any unique songs across your playlists.');
-            }
-
-            const SPOTIFY_PLAYLIST_LIMIT = 10000; // Spotify's maximum playlist size
-            const totalSongs = trackUrisArray.length;
-            const numberOfPlaylists = Math.ceil(totalSongs / SPOTIFY_PLAYLIST_LIMIT);
-            const createdPlaylistsInfo = [];
-
-            for (let p = 0; p < numberOfPlaylists; p++) {
-                const startIdx = p * SPOTIFY_PLAYLIST_LIMIT;
-                const endIdx = Math.min(startIdx + SPOTIFY_PLAYLIST_LIMIT, totalSongs);
-                const currentChunkOfTracks = trackUrisArray.slice(startIdx, endIdx);
-                
-                const playlistName = `All My Playlists Songs - Part ${p + 1} - ${new Date().toLocaleDateString()}`;
-                const description = `Part ${p + 1} of a playlist containing all unique songs from your Spotify playlists.`;
-
-                setStatus(`Creating playlist "${playlistName}" (${p + 1}/${numberOfPlaylists})...`);
-                const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                    body: JSON.stringify({ name: playlistName, description: description, public: false })
-                });
-
-                if (!playlistResponse.ok) {
-                    const errorBody = await playlistResponse.json();
-                    throw new Error(`Failed to create playlist "${playlistName}": ${playlistResponse.status} - ${errorBody.error?.message || 'Unknown error'}`);
-                }
-                const newPlaylist = await playlistResponse.json();
-                createdPlaylistsInfo.push(newPlaylist);
-
-                setStatus(`Adding ${currentChunkOfTracks.length} songs to "${newPlaylist.name}"...`);
-                const chunkSizeForAdding = 100;
-                for (let i = 0; i < currentChunkOfTracks.length; i += chunkSizeForAdding) {
-                    const chunk = currentChunkOfTracks.slice(i, i + chunkSizeForAdding);
-                    const addTracksResponse = await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                        body: JSON.stringify({ uris: chunk })
-                    });
-
-                    if (!addTracksResponse.ok) {
-                        const errorBody = await addTracksResponse.json();
-                        console.error(`Error adding tracks chunk to playlist ${newPlaylist.name}:`, errorBody);
-                        throw new Error(`Failed to add tracks to playlist "${newPlaylist.name}": ${addTracksResponse.status} - ${errorBody.error?.message || 'Unknown error'}`);
-                    }
-                    // Update overall progress based on all songs being processed
-                    const overallProgress = ((startIdx + i + chunk.length) / totalSongs) * 100;
-                    setAllSongsProgress(overallProgress);
-                }
-            }
-            
-            setCreatedPlaylist(createdPlaylistsInfo[0]); // Set the first created playlist as the main one for display if needed
-            setStatus(`Successfully created ${numberOfPlaylists} playlist(s)!`);
-            setLibraryVersion(v => v + 1); 
-
-        } catch (e) {
-            setError(e.message);
-            setStatus('');
-            console.error("Error creating all songs from playlists:", e);
-        } finally {
-            setIsAllSongsLoading(false);
-            setAllSongsProgress(0);
-        }
-    };
-
 
     return (
         <div className="space-y-8">
             <h1 className="text-3xl font-bold mb-4">Playlist Creator</h1>
             
-            {error && <div className="p-3 bg-red-800 text-white rounded-md mb-4">{error}</div>}
-            {status && !error && <div className="p-3 bg-blue-800 text-white rounded-md mb-4">{status}</div>}
+            {creatorError && <div className="p-3 bg-red-800 text-white rounded-md mb-4">{creatorError}</div>}
+            {creatorStatus && !creatorError && <div className="p-3 bg-blue-800 text-white rounded-md mb-4">{creatorStatus}</div>}
             
+            {/* Display link to the created playlist if available and no error */}
+            {createdPlaylist && !creatorError && (
+                <div className="p-3 bg-green-800 text-white rounded-md mb-4">
+                    Playlist created: <a href={createdPlaylist.external_urls.spotify} target="_blank" rel="noopener noreferrer" className="underline hover:no-underline">
+                        {createdPlaylist.name}
+                    </a>
+                </div>
+            )}
+
              <div className="bg-gray-800 p-6 rounded-lg">
                 <h2 className="text-xl font-semibold mb-2">WQXR Daily Playlist</h2>
                 <p className="text-gray-400 mb-4">
@@ -1209,7 +1229,7 @@ function PlaylistCreator() {
                 </p>
                 <button 
                     onClick={handleCreateWQXRPlaylist} 
-                    disabled={isWqxrLoading || isCustomLoading || isTopTracksLoading || isAllSongsLoading}
+                    disabled={isAnyCurationLoading}
                     className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
                 >
                     {isWqxrLoading ? 'Creating...' : "Create Yesterday's Playlist"}
@@ -1232,7 +1252,7 @@ function PlaylistCreator() {
                 </p>
                 <button 
                     onClick={handleCreateTopTracksPlaylist} 
-                    disabled={isWqxrLoading || isCustomLoading || isTopTracksLoading || isAllSongsLoading}
+                    disabled={isAnyCurationLoading}
                     className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
                 >
                     {isTopTracksLoading ? 'Creating...' : "Create Top Tracks Playlist"}
@@ -1255,7 +1275,7 @@ function PlaylistCreator() {
                 </p>
                 <button 
                     onClick={handleCreateAllSongsPlaylist} 
-                    disabled={isWqxrLoading || isCustomLoading || isTopTracksLoading || isAllSongsLoading}
+                    disabled={isAnyCurationLoading}
                     className="bg-orange-600 hover:bg-orange-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
                 >
                     {isAllSongsLoading ? 'Creating...' : "Create All My Playlists Songs"}
@@ -1287,7 +1307,7 @@ function PlaylistCreator() {
                 </div>
                 <button 
                     onClick={handleCreateAiPlaylist} 
-                    disabled={isWqxrLoading || isCustomLoading || isTopTracksLoading || isAllSongsLoading}
+                    disabled={isAnyCurationLoading}
                     className="mt-6 bg-green-600 hover:bg-green-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
                 >
                     {isCustomLoading ? 'Creating...' : "Create AI Playlist"}
