@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, createContext, useContext, use
 
 // --- Spotify API Configuration ---
 // The redirect URI is set to the current window's origin.
-const REDIRECT_URI = window.location.origin; 
+const REDIRECT_URI = window.location.origin;
 const AUTH_ENDPOINT = "https://accounts.spotify.com/authorize";
 const TOKEN_ENDPOINT = "https://accounts.spotify.com/api/token";
 // Scopes define the permissions the app is requesting from the user.
@@ -43,7 +43,7 @@ async function generateCodeChallenge(codeVerifier) {
     const data = new TextEncoder().encode(codeVerifier);
     // Corrected from Uint9Array to Uint8Array
     const digest = await window.crypto.subtle.digest('SHA-256', data);
-    return btoa(String.fromCharCode.apply(null, [...new Uint8Array(digest)])) 
+    return btoa(String.fromCharCode.apply(null, [...new Uint8Array(digest)]))
         .replace(/\+/g, '-')
         .replace(/\//g, '_')
         .replace(/=+$/, '');
@@ -158,7 +158,7 @@ function LoginScreen() {
 export default function App() {
     const [token, setToken] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
-    const [view, setView] = useState('home'); 
+    const [view, setView] = useState('home');
     const [selectedPlaylistId, setSelectedPlaylistId] = useState(null);
     const [player, setPlayer] = useState(null);
     const [isPlayerReady, setIsPlayerReady] = useState(false);
@@ -191,7 +191,7 @@ export default function App() {
 
 
     const [isTopTracksLoading, setIsTopTracksLoading] = useState(false);
-    const [topTracksProgress, setTopTracksProgress] = useState(0); 
+    const [topTracksProgress, setTopTracksProgress] = useState(0);
     const [topTracksAbortController, setTopTracksAbortController] = useState(null); // New AbortController state
 
 
@@ -240,10 +240,10 @@ export default function App() {
         // fetchUniqueTrackUisAndArtistIdsFromPlaylists is now directly defined here
         const fetchUniqueTrackUisAndArtistIdsFromPlaylists = useCallback(async (signal) => {
             let allPlaylists = [];
-            let nextPlaylistsUrl = 'https://api.spotify.com/v1/me/playlists?limit=50'; 
+            let nextPlaylistsUrl = 'https://api.spotify.com/v1/me/playlists?limit=50';
 
             while (nextPlaylistsUrl) {
-                const response = await fetch(nextPlaylistsUrl, { 
+                const response = await fetch(nextPlaylistsUrl, {
                     headers: { Authorization: `Bearer ${token}` }, signal
                 });
                 if (!response.ok) {
@@ -251,7 +251,7 @@ export default function App() {
                 }
                 const data = await response.json();
                 allPlaylists = allPlaylists.concat(data.items);
-                nextPlaylistsUrl = data.next; 
+                nextPlaylistsUrl = data.next;
                 await delay(50); // Add a small delay between playlist page fetches
             }
 
@@ -266,15 +266,15 @@ export default function App() {
             for (const playlist of allPlaylists) {
                 let nextTracksUrl = `https://api.spotify.com/v1/playlists/${playlist.id}/tracks?limit=100`;
                 while (nextTracksUrl) {
-                    const response = await fetch(nextTracksUrl, { 
+                    const response = await fetch(nextTracksUrl, {
                         headers: { Authorization: `Bearer ${token}` }, signal
                     });
                     if (!response.ok) {
                         console.warn(`Failed to fetch tracks for playlist "${playlist.name}" (${playlist.id}): ${response.status}`);
-                        break; 
+                        break;
                     }
                     const data = await response.json();
-                    if (data.items) { 
+                    if (data.items) {
                         data.items.forEach(item => {
                             if (item.track && typeof item.track.uri === 'string' && item.track.uri.startsWith('spotify:track:')) {
                                 uniqueTrackUris.add(item.track.uri);
@@ -284,7 +284,7 @@ export default function App() {
                             }
                         });
                     }
-                    nextTracksUrl = data.next; 
+                    nextTracksUrl = data.next;
                     await delay(50); // Add a small delay between track page fetches for each playlist
                 }
                 processedPlaylistsCount++;
@@ -315,7 +315,7 @@ export default function App() {
         setCreatorStatus('Requesting playlist from proxy server...');
 
         try {
-            const { year, month, day } = getYesterdayDateParts(); 
+            const { year, month, day } = getYesterdayDateParts();
             const proxyResponse = await fetch(`http://localhost:3001/wqxr-playlist?year=${year}&month=${month}&day=${day}`, { signal }); // Pass signal
             
             if (!proxyResponse.ok) throw new Error('Failed to fetch data from proxy server. Make sure it is running.');
@@ -330,7 +330,7 @@ export default function App() {
             const trackUris = [];
             for (const [index, track] of wqxrTracks.entries()) {
                 const response = await fetch(`https://api.spotify.com/v1/search?q=${encodeURIComponent(`track:${track.title} artist:${track.composer}`)}&type=track&limit=1`, {
-                    headers: { Authorization: `Bearer ${token}` }, signal 
+                    headers: { Authorization: `Bearer ${token}` }, signal
                 });
                 const searchData = await response.json();
                 if (searchData.tracks.items.length > 0) {
@@ -344,7 +344,7 @@ export default function App() {
             if (trackUris.length === 0) throw new Error('Could not find any of the WQXR tracks on Spotify.');
             
             setCreatorStatus('Creating new WQXR playlist...');
-            const playlistName = `WQXR Daily - ${year}-${month}-${day}`; 
+            const playlistName = `WQXR Daily - ${year}-${month}-${day}`;
             const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`},
@@ -372,7 +372,7 @@ export default function App() {
             console.error(e);
         } finally {
             setIsWqxrLoading(false);
-            setWqxrProgress(0); 
+            setWqxrProgress(0);
             setWqxrAbortController(null); // Clear controller reference
         }
     }, [profile, token, getYesterdayDateParts, setLibraryVersion]);
@@ -433,7 +433,7 @@ export default function App() {
                 }
             };
             
-            const apiKey = "AIzaSyAsb7lrYNWBzSIUe5RUCOCMib20FzAX61M"; 
+            const apiKey = "AIzaSyAsb7lrYNWBzSIUe5RUCOCMib20FzAX61M";
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
             const geminiResponse = await fetch(apiUrl, {
                 method: 'POST',
@@ -460,6 +460,7 @@ export default function App() {
             }
 
             setCreatorStatus('Searching for suggested songs on Spotify...');
+            const trackUris = []; // Define trackUris here to be accessible throughout the function
             await Promise.all(aiSuggestions.map(async (song) => {
                 const query = encodeURIComponent(`track:${song.track} artist:${song.artist}`);
                 const searchResponse = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, {
@@ -527,42 +528,59 @@ export default function App() {
         setCreatorError('');
         setCreatedPlaylist(null);
         setTopTracksProgress(0);
-        setCreatorStatus('Fetching your top tracks from Spotify...');
 
         try {
-            const response = await fetch(`https://api.spotify.com/v1/me/top/tracks?limit=50`, {
-                headers: { Authorization: `Bearer ${token}` }, signal
-            });
-            if (!response.ok) {
-                throw new Error(`Failed to fetch top tracks: ${response.status}`);
-            }
-            const data = await response.json();
-            const topTracks = data.items;
+            const fetchTopTracksPage = async (offset) => {
+                const response = await fetch(`https://api.spotify.com/v1/me/top/tracks?limit=50&offset=${offset}&time_range=long_term`, {
+                    headers: { Authorization: `Bearer ${token}` }, signal
+                });
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch top tracks page (offset ${offset}): ${response.status}`);
+                }
+                return await response.json();
+            };
+
+            setCreatorStatus('Fetching your top 100 tracks (Page 1/2)...');
+            const page1 = await fetchTopTracksPage(0);
+            setTopTracksProgress(25);
+
+            await delay(100); // Small delay to avoid hitting rate limits too quickly
+
+            setCreatorStatus('Fetching your top 100 tracks (Page 2/2)...');
+            const page2 = await fetchTopTracksPage(50);
+            const topTracks = [...page1.items, ...page2.items];
+            setTopTracksProgress(50);
+
 
             if (!topTracks || topTracks.length === 0) {
                 throw new Error('Could not find any top tracks. Listen to more music on Spotify!');
             }
 
             const trackUris = topTracks.map(track => track.uri);
+            setTopTracksProgress(60);
+
 
             setCreatorStatus(`Found ${trackUris.length} top tracks. Creating playlist...`);
-            const playlistName = `My Top Tracks - ${new Date().toLocaleDateString()}`;
+            const playlistName = `My Top 100 Tracks - ${new Date().toLocaleDateString()}`;
             const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ name: playlistName, description: 'A playlist generated from your top Spotify tracks.', public: false }), signal
+                body: JSON.stringify({ name: playlistName, description: 'A playlist generated from your top 100 Spotify tracks.', public: false }), signal
             });
+            setTopTracksProgress(75);
             const newPlaylist = await playlistResponse.json();
 
             setCreatorStatus('Adding tracks to your new top tracks playlist...');
+            // Spotify's add tracks to playlist endpoint can handle up to 100 URIs per request.
             await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                 body: JSON.stringify({ uris: trackUris }), signal
             });
+            setTopTracksProgress(100);
 
             setCreatedPlaylist(newPlaylist);
-            setCreatorStatus('Top tracks playlist created successfully!');
+            setCreatorStatus('Top 100 tracks playlist created successfully!');
             setLibraryVersion(v => v + 1);
         } catch (e) {
             if (e.name === 'AbortError') {
@@ -658,9 +676,9 @@ export default function App() {
             }
             
             setAllSongsProgress(100); // Final progress update
-            setCreatedPlaylist(createdPlaylistsInfo[0]); 
+            setCreatedPlaylist(createdPlaylistsInfo[0]);
             setCreatorStatus(`Successfully created ${numberOfPlaylists} playlist(s)!`);
-            setLibraryVersion(v => v + 1); 
+            setLibraryVersion(v => v + 1);
 
         } catch (e) {
             if (e.name === 'AbortError') {
@@ -704,7 +722,7 @@ export default function App() {
                 throw new Error('Could not find any unique songs across your playlists to determine genres.');
             }
 
-            setGenreMixProgress(50); 
+            setGenreMixProgress(50);
             setCreatorStatus(`Found ${uniqueArtistIds.length} unique artists. Fetching their genres (Phase 2/2: 50-100%)...`);
 
             // Phase 2: Fetch genres for unique artists
@@ -719,7 +737,7 @@ export default function App() {
                 if (!artistsResponse.ok) {
                     console.warn(`Failed to fetch artists batch: ${artistsResponse.status}`);
                     // Don't throw fatal error, just skip this batch
-                    continue; 
+                    continue;
                 }
                 const artistsData = await artistsResponse.json();
                 artistsData.artists.forEach(artist => {
@@ -729,7 +747,7 @@ export default function App() {
                 await delay(50); // Delay for artist batch fetches
             }
 
-            setGenreMixProgress(100); 
+            setGenreMixProgress(100);
             setCreatorStatus(`All unique genres collected (${uniqueGenres.size} genres). Logging to console...`);
             
             const uniqueGenresArray = Array.from(uniqueGenres);
@@ -919,7 +937,7 @@ export default function App() {
 function Sidebar() {
     const { view, setView, selectedPlaylistId, setSelectedPlaylistId, logout, libraryVersion, profile, setPlaylistToEdit, setPlaylistToDelete } = useContext(AppContext);
     // Modified useSpotifyApi call to trigger re-fetch when libraryVersion changes
-    const { data: playlists, loading: playlistsLoading } = useSpotifyApi(`/me/playlists?limit=50&v=${libraryVersion}`); 
+    const { data: playlists, loading: playlistsLoading } = useSpotifyApi(`/me/playlists?limit=50&v=${libraryVersion}`);
     const [activeMenu, setActiveMenu] = useState(null);
     
     const NavItem = ({ label, targetView, icon }) => (
@@ -962,7 +980,7 @@ function Sidebar() {
                                 {profile?.id === playlist.owner.id && (
                                 <div className="relative">
                                     <button onClick={() => setActiveMenu(activeMenu === playlist.id ? null : playlist.id)} className="hidden group-hover:block p-1">
-                                           <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 16 16"><path d="M9.5 13a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/></svg>
+                                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 16 16"><path d="M9.5 13a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/></svg>
                                     </button>
                                     {activeMenu === playlist.id && (
                                         <div className="absolute right-0 bottom-full mb-1 w-32 bg-gray-800 rounded-md shadow-lg z-10">
@@ -1113,7 +1131,7 @@ function PlayerBar() {
                 <div className="flex items-center gap-4 text-2xl">
                     <button onClick={() => player.previousTrack()} className="text-gray-400 hover:text-white">«</button>
                     <button onClick={togglePlay} className="p-2 bg-white text-black rounded-full hover:scale-105">
-                        {isPaused ? 
+                        {isPaused ?
                             <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg> :
                             <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
                         }
@@ -1149,7 +1167,7 @@ const useSpotifyApi = (url) => {
     const CACHE_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 
     useEffect(() => {
-        let isMounted = true; 
+        let isMounted = true;
         const fetchData = async () => {
             if (!token || !url) {
                 if (isMounted) setLoading(false);
@@ -1184,11 +1202,11 @@ const useSpotifyApi = (url) => {
 
             let retryCount = 0;
             const maxRetries = 3;
-            let currentDelay = 100; 
+            let currentDelay = 100;
 
             while (retryCount <= maxRetries) {
                 try {
-                    if (retryCount > 0 || url.includes('/me/playlists')) { 
+                    if (retryCount > 0 || url.includes('/me/playlists')) {
                         await new Promise(resolve => setTimeout(resolve, currentDelay));
                     }
                     
@@ -1208,9 +1226,9 @@ const useSpotifyApi = (url) => {
                         const delayBeforeRetry = retryAfter ? parseInt(retryAfter, 10) * 1000 : currentDelay * 2;
                         console.warn(`Spotify API Rate Limit Hit (429). Retrying in ${delayBeforeRetry}ms... (Attempt ${retryCount + 1}/${maxRetries + 1}) for ${url}`);
                         await new Promise(resolve => setTimeout(resolve, delayBeforeRetry));
-                        currentDelay = delayBeforeRetry; 
+                        currentDelay = delayBeforeRetry;
                         retryCount++;
-                        continue; 
+                        continue;
                     }
                     if (!response.ok) {
                         throw new Error(`HTTP error! status: ${response.status}`);
@@ -1230,7 +1248,7 @@ const useSpotifyApi = (url) => {
                         setData(result);
                         setLoading(false);
                     }
-                    return; 
+                    return;
                 } catch (e) {
                     if (isMounted) {
                         setError(e);
@@ -1245,9 +1263,9 @@ const useSpotifyApi = (url) => {
         fetchData();
 
         return () => {
-            isMounted = false; 
+            isMounted = false;
         };
-    }, [token, url, logout]); 
+    }, [token, url, logout]);
     return { data, error, loading };
 };
 
@@ -1290,7 +1308,7 @@ function PlaylistCard({ imageUrl, title, subtitle, isArtist = false, onClick }) 
 function HomePage() {
     const { setProfile } = useContext(AppContext);
     // Added v parameter to force refresh on libraryVersion change
-    const { data: profileData } = useSpotifyApi('/me'); 
+    const { data: profileData } = useSpotifyApi('/me');
     const { data: topArtists, loading: artistsLoading, error: artistsError } = useSpotifyApi('/me/top/artists?limit=5');
     const { data: recent, loading: recentLoading, error: recentError } = useSpotifyApi('/me/player/recently-played?limit=6');
 
@@ -1318,9 +1336,9 @@ function HomePage() {
                             <img src={track.album.images[0]?.url || 'https://placehold.co/80x80/181818/FFFFFF?text=...'} alt={track.name} className="w-20 h-20 flex-shrink-0"/>
                             <p className="font-semibold text-white flex-1 pr-2">{track.name}</p>
                             <div className="mr-4 w-12 h-12 bg-green-500 rounded-full items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 shadow-xl hidden sm:flex">
-                             <svg className="w-6 h-6 text-black" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                               <svg className="w-6 h-6 text-black" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                             </div>
-                       </div> 
+                       </div>
                     ))}
                 </div>
             </ContentSection>
@@ -1328,8 +1346,8 @@ function HomePage() {
             <ContentSection title="Your Top Artists" loading={artistsLoading} error={artistsError}>
                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
                     {topArtists?.items.map(artist => (
-                       <PlaylistCard 
-                            key={artist.id} 
+                       <PlaylistCard
+                            key={artist.id}
                             imageUrl={artist.images[0]?.url}
                             title={artist.name}
                             subtitle="Artist"
@@ -1400,8 +1418,8 @@ function PlaylistView({ playlistId }) {
                         const isPlaying = currentTrack?.uri === track.uri && !isPaused;
 
                         return (
-                            <div 
-                                key={track.id + index} 
+                            <div
+                                key={track.id + index}
                                 className="grid grid-cols-[auto,1fr,auto] items-center gap-4 p-2 rounded-md hover:bg-white/10 group"
                                 onDoubleClick={() => playTrack(track.uri)}
                             >
@@ -1409,12 +1427,12 @@ function PlaylistView({ playlistId }) {
                                    { isPlaying ?
                                        ( <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-green-500 animate-pulse"><path d="M2.69231 6.30769V9.69231H0V6.30769H2.69231ZM6.76923 12.4615V3.53846H4.07692V12.4615H6.76923ZM10.8462 16V0H8.15385V16H10.8462ZM14.9231 12.4615V3.53846H12.2308V12.4615H14.9231Z" fill="currentColor"/></svg> ) :
                                        ( <>
-                                            <span className="group-hover:hidden">{index + 1}</span>
-                                            <button onClick={() => playTrack(track.uri)} className="text-white hidden group-hover:block">
-                                                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                                            </button>
+                                           <span className="group-hover:hidden">{index + 1}</span>
+                                           <button onClick={() => playTrack(track.uri)} className="text-white hidden group-hover:block">
+                                               <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                                           </button>
                                        </> )
-                                    }
+                                   }
                                 </div>
                                 <div className="flex items-center gap-4">
                                     <img src={track.album.images[2]?.url || 'https://placehold.co/40x40/181818/FFFFFF?text=...'} alt={track.name} className="w-10 h-10"/>
@@ -1438,7 +1456,7 @@ function PlaylistView({ playlistId }) {
 }
 
 function PlaylistCreator() {
-    const { 
+    const {
         token, setLibraryVersion, profile,
         creatorStatus, creatorError, createdPlaylist, // createdPlaylist is still here but not rendered directly
         isWqxrLoading, wqxrProgress, handleCreateWQXRPlaylist, handleCancelWQXRPlaylist,
@@ -1464,8 +1482,8 @@ function PlaylistCreator() {
             {showCreatorStatus && (creatorError || creatorStatus) && (
                 <div className={`p-3 rounded-md mb-4 flex items-center justify-between transition-opacity duration-2000 ${creatorError ? 'bg-red-800' : 'bg-blue-800'} ${fadeCreatorStatusOut ? 'opacity-0' : 'opacity-100'}`}>
                     <p className="flex-1">{creatorError || creatorStatus}</p>
-                    <button 
-                        onClick={() => setShowCreatorStatus(false)} 
+                    <button
+                        onClick={() => setShowCreatorStatus(false)}
                         className="ml-4 text-white hover:text-gray-300 focus:outline-none"
                         aria-label="Close status"
                     >
@@ -1481,16 +1499,16 @@ function PlaylistCreator() {
                 <p className="text-gray-400 mb-4">
                     Create a new playlist based on the music played yesterday ({yesterdayDay}-{yesterdayMonth}-{yesterdayYear}) on WQXR.
                 </p>
-                <button 
-                    onClick={handleCreateWQXRPlaylist} 
+                <button
+                    onClick={handleCreateWQXRPlaylist}
                     disabled={isAnyCurationLoading}
                     className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
                 >
                     {isWqxrLoading ? 'Creating...' : "Create Yesterday's Playlist"}
                 </button>
                 {isWqxrLoading && (
-                    <button 
-                        onClick={handleCancelWQXRPlaylist} 
+                    <button
+                        onClick={handleCancelWQXRPlaylist}
                         className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
                     >
                         Cancel
@@ -1510,18 +1528,18 @@ function PlaylistCreator() {
             <div className="bg-gray-800 p-6 rounded-lg">
                 <h2 className="text-xl font-semibold mb-2">Playlist from Your Top Tracks</h2>
                 <p className="text-gray-400 mb-4">
-                    Instantly create a new playlist composed of your 50 most listened to tracks on Spotify.
+                    Instantly create a new playlist composed of your 100 most listened to tracks on Spotify.
                 </p>
-                <button 
-                    onClick={handleCreateTopTracksPlaylist} 
+                <button
+                    onClick={handleCreateTopTracksPlaylist}
                     disabled={isAnyCurationLoading}
                     className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
                 >
                     {isTopTracksLoading ? 'Creating...' : "Create Top Tracks Playlist"}
                 </button>
                 {isTopTracksLoading && (
-                    <button 
-                        onClick={handleCancelTopTracksPlaylist} 
+                    <button
+                        onClick={handleCancelTopTracksPlaylist}
                         className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
                     >
                         Cancel
@@ -1543,16 +1561,16 @@ function PlaylistCreator() {
                 <p className="text-gray-400 mb-4">
                     Create one or more playlists containing every unique song from all your existing Spotify playlists.
                 </p>
-                <button 
-                    onClick={handleCreateAllSongsPlaylist} 
+                <button
+                    onClick={handleCreateAllSongsPlaylist}
                     disabled={isAnyCurationLoading}
                     className="bg-orange-600 hover:bg-orange-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
                 >
                     {isAllSongsLoading ? 'Creating...' : "Create All My Playlists Songs"}
                 </button>
                 {isAllSongsLoading && (
-                    <button 
-                        onClick={handleCancelAllSongsPlaylist} 
+                    <button
+                        onClick={handleCancelAllSongsPlaylist}
                         className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
                     >
                         Cancel
@@ -1574,16 +1592,16 @@ function PlaylistCreator() {
                 <p className="text-gray-400 mb-4">
                     Collects all unique genres from artists in your playlists and logs them to the console.
                 </p>
-                <button 
-                    onClick={handleCreateGenreMixPlaylist} 
+                <button
+                    onClick={handleCreateGenreMixPlaylist}
                     disabled={isAnyCurationLoading}
                     className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
                 >
                     {isGenreMixLoading ? 'Collecting Genres...' : "Collect & Log Genres"}
                 </button>
                 {isGenreMixLoading && (
-                    <button 
-                        onClick={handleCancelGenreMixPlaylist} 
+                    <button
+                        onClick={handleCancelGenreMixPlaylist}
                         className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
                     >
                         Cancel
@@ -1614,16 +1632,16 @@ function PlaylistCreator() {
                          <textarea value={aiPrompt} onChange={e => setAiPrompt(e.target.value)} placeholder="e.g., an upbeat roadtrip playlist with 90s alternative rock" rows="3" className="w-full p-2 bg-gray-700 rounded-md border-gray-600"></textarea>
                      </div>
                 </div>
-                <button 
-                    onClick={handleCreateAiPlaylist} 
+                <button
+                    onClick={handleCreateAiPlaylist}
                     disabled={isAnyCurationLoading}
                     className="mt-6 bg-green-600 hover:bg-green-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
                 >
                     {isCustomLoading ? 'Creating...' : "Create AI Playlist"}
                 </button>
                 {isCustomLoading && (
-                    <button 
-                        onClick={handleCancelAiPlaylist} 
+                    <button
+                        onClick={handleCancelAiPlaylist}
                         className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
                     >
                         Cancel
@@ -1782,7 +1800,7 @@ function EditPlaylistModal({ playlist, onClose }) {
                 const errorData = await response.json();
                 throw new Error(errorData.error.message || 'Failed to update playlist.');
             }
-            setLibraryVersion(v => v + 1); 
+            setLibraryVersion(v => v + 1);
             onClose();
         } catch (error) {
             console.error("Error updating playlist:", error);
@@ -1841,9 +1859,9 @@ function DeleteConfirmationModal({ playlist, onClose }) {
                 const errorData = await response.json();
                 throw new Error(errorData.error.message || 'Failed to delete playlist.');
             }
-            setLibraryVersion(v => v + 1); 
+            setLibraryVersion(v => v + 1);
             setSelectedPlaylistId(null);
-            setView('home'); 
+            setView('home');
             onClose();
         } catch (error) {
             console.error("Error deleting playlist:", error);
