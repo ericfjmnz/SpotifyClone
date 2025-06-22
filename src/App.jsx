@@ -383,12 +383,10 @@ export default function App() {
 
 
     const handleCreateAiPlaylist = useCallback(async () => {
-        // Reset states
         setCreatorError('');
         setCreatorStatus('');
         setCreatedPlaylist(null);
     
-        // Validate inputs
         if (!customPlaylistName.trim()) {
             setCreatorError('Playlist name cannot be empty.');
             return;
@@ -402,7 +400,6 @@ export default function App() {
             return;
         }
     
-        // Setup for aborting the request
         const controller = new AbortController();
         setCustomAbortController(controller);
         const signal = controller.signal;
@@ -410,16 +407,14 @@ export default function App() {
         setIsCustomLoading(true);
     
         const totalSongsToRequest = 200;
-        const songsPerBatch = 100;
-        const numberOfBatches = Math.ceil(totalSongsToRequest / songsPerBatch);
-        let allTrackUris = [];
+        const songsPerBatch = 50; // Ask for 50 songs per batch for higher reliability
+        const numberOfBatches = Math.ceil(totalSongsToRequest / songsPerBatch); // This will be 4
+        let allTrackUris = new Set();
     
         try {
-            // Loop to fetch songs in batches
             for (let i = 0; i < numberOfBatches; i++) {
                 setCreatorStatus(`Asking AI for song ideas (Batch ${i + 1}/${numberOfBatches})...`);
     
-                // Construct the prompt for the AI
                 const geminiPrompt = `Based on the following theme: "${aiPrompt}", generate a list of ${songsPerBatch} suitable songs. Include a mix of popular and less common tracks. This is batch ${i + 1} of ${numberOfBatches}, so please provide different songs than previous batches if possible.`;
                 const payload = {
                     contents: [{ role: "user", parts: [{ text: geminiPrompt }] }],
@@ -445,7 +440,6 @@ export default function App() {
                     }
                 };
     
-                // Fetch song ideas from the AI
                 const apiKey = "AIzaSyAsb7lrYNWBzSIUe5RUCOCMib20FzAX61M";
                 const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
                 const geminiResponse = await fetch(apiUrl, {
@@ -462,23 +456,21 @@ export default function App() {
     
                 const result = await geminiResponse.json();
                 if (!result.candidates?.[0]?.content?.parts?.[0]?.text) {
-                    throw new Error("AI response was empty or invalid. Please try a different prompt.");
+                    console.warn(`AI response for batch ${i + 1} was empty or invalid.`);
+                    continue; // Skip to the next batch
                 }
     
                 const songsText = result.candidates[0].content.parts[0].text;
                 const aiSuggestions = JSON.parse(songsText).songs;
     
                 if (!aiSuggestions || aiSuggestions.length === 0) {
-                    // Don't throw a fatal error, just warn and continue to the next batch
                     console.warn(`AI did not suggest any songs for batch ${i + 1}.`);
                     continue;
                 }
     
                 setCreatorStatus(`Searching for suggested songs on Spotify (Batch ${i + 1}/${numberOfBatches})...`);
     
-                // Search for each suggested song on Spotify
-                const batchTrackUris = [];
-                await Promise.all(aiSuggestions.map(async (song) => {
+                for (const song of aiSuggestions) {
                     const query = encodeURIComponent(`track:${song.track} artist:${song.artist}`);
                     const searchResponse = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, {
                         headers: { Authorization: `Bearer ${token}` },
@@ -486,20 +478,17 @@ export default function App() {
                     });
                     const searchData = await searchResponse.json();
                     if (searchData.tracks.items.length > 0) {
-                        batchTrackUris.push(searchData.tracks.items[0].uri);
+                        allTrackUris.add(searchData.tracks.items[0].uri);
                     }
-                    await delay(50); // Rate-limiting delay
-                }));
-                allTrackUris.push(...batchTrackUris);
+                    await delay(50);
+                }
             }
     
-            if (allTrackUris.length === 0) {
+            const uniqueTrackUris = Array.from(allTrackUris);
+            if (uniqueTrackUris.length === 0) {
                 throw new Error('Could not find any of the AI-suggested songs on Spotify.');
             }
     
-            const uniqueTrackUris = [...new Set(allTrackUris)]; // Remove duplicates
-    
-            // Create the new playlist on Spotify
             setCreatorStatus(`Creating playlist "${customPlaylistName}"...`);
             const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
                 method: 'POST',
@@ -509,7 +498,6 @@ export default function App() {
             });
             const newPlaylist = await playlistResponse.json();
     
-            // Add tracks to the new playlist in chunks of 100
             setCreatorStatus(`Adding ${uniqueTrackUris.length} songs to the new playlist...`);
             const chunkSize = 100;
             for (let i = 0; i < uniqueTrackUris.length; i += chunkSize) {
@@ -520,10 +508,9 @@ export default function App() {
                     body: JSON.stringify({ uris: chunk }),
                     signal
                 });
-                await delay(100); // Rate-limiting delay
+                await delay(100);
             }
     
-            // Finalize
             setCreatedPlaylist(newPlaylist);
             setCreatorStatus('AI-powered playlist created successfully!');
             setLibraryVersion(v => v + 1);
