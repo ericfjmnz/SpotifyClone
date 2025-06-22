@@ -177,6 +177,7 @@ export default function App() {
     const [creatorError, setCreatorError] = useState('');
     const [createdPlaylist, setCreatedPlaylist] = useState(null); // Can be used to show link to newly created playlist
     const [showCreatorStatus, setShowCreatorStatus] = useState(false); // New state to control status visibility
+    const [fadeCreatorStatusOut, setFadeCreatorStatusOut] = useState(false); // New state for fade effect
 
 
     const [isWqxrLoading, setIsWqxrLoading] = useState(false);
@@ -198,16 +199,27 @@ export default function App() {
     const [allSongsProgress, setAllSongsProgress] = useState(0);
     const [allSongsAbortController, setAllSongsAbortController] = useState(null); // New AbortController state
 
-    // Effect to manage status message visibility and auto-hide
+    // Effect to manage status message visibility and auto-hide with fade
     useEffect(() => {
         if (creatorStatus) {
             setShowCreatorStatus(true);
-            const timer = setTimeout(() => {
+            // Trigger fade out after 1 minute - 2 seconds (for fade duration)
+            const fadeTimer = setTimeout(() => {
+                setFadeCreatorStatusOut(true);
+            }, 60000 - 2000); // 58 seconds
+
+            // Completely hide and clear after 1 minute
+            const hideTimer = setTimeout(() => {
                 setCreatorStatus('');
                 setCreatorError('');
                 setShowCreatorStatus(false);
-            }, 2000); // Hide after 2 seconds
-            return () => clearTimeout(timer); // Cleanup timer
+                setFadeCreatorStatusOut(false); // Reset fade state
+            }, 60000); // 60 seconds
+            
+            return () => {
+                clearTimeout(fadeTimer);
+                clearTimeout(hideTimer);
+            }; // Cleanup timers
         }
     }, [creatorStatus]);
 
@@ -786,7 +798,7 @@ export default function App() {
     return (
         <AppContext.Provider value={{ token, view, setView, selectedPlaylistId, setSelectedPlaylistId, player, isPlayerReady, currentTrack, isPaused, logout, deviceId, position, libraryVersion, setLibraryVersion, profile, setProfile, setPlaylistToEdit, setPlaylistToDelete,
             // Playlist Creator states and functions passed via context
-            creatorStatus, creatorError, createdPlaylist, showCreatorStatus, setShowCreatorStatus,
+            creatorStatus, creatorError, createdPlaylist, showCreatorStatus, setShowCreatorStatus, fadeCreatorStatusOut,
             isWqxrLoading, wqxrProgress, handleCreateWQXRPlaylist, handleCancelWQXRPlaylist,
             isCustomLoading, customPlaylistName, setCustomPlaylistName, aiPrompt, setAiPrompt, handleCreateAiPlaylist, handleCancelAiPlaylist, resetCustomForm,
             isTopTracksLoading, topTracksProgress, handleCreateTopTracksPlaylist, handleCancelTopTracksPlaylist,
@@ -1268,7 +1280,7 @@ function PlaylistCreator() {
         isTopTracksLoading, topTracksProgress, handleCreateTopTracksPlaylist, handleCancelTopTracksPlaylist,
         isAllSongsLoading, allSongsProgress, handleCreateAllSongsPlaylist, handleCancelAllSongsPlaylist,
         getYesterdayDateParts, // Destructure getYesterdayDateParts from context
-        showCreatorStatus, setShowCreatorStatus // Access new state and setter
+        showCreatorStatus, setShowCreatorStatus, fadeCreatorStatusOut // Access new state and setter
     } = useContext(AppContext);
 
     // Determine if any curation is currently running to disable buttons
@@ -1283,7 +1295,7 @@ function PlaylistCreator() {
             
             {/* Display status or error message */}
             {showCreatorStatus && (creatorError || creatorStatus) && (
-                <div className={`p-3 rounded-md mb-4 flex items-center justify-between ${creatorError ? 'bg-red-800' : 'bg-blue-800'}`}>
+                <div className={`p-3 rounded-md mb-4 flex items-center justify-between transition-opacity duration-2000 ${creatorError ? 'bg-red-800' : 'bg-blue-800'} ${fadeCreatorStatusOut ? 'opacity-0' : 'opacity-100'}`}>
                     <p className="flex-1">{creatorError || creatorStatus}</p>
                     <button 
                         onClick={() => setShowCreatorStatus(false)} 
