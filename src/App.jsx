@@ -779,36 +779,65 @@ export default function App() {
 
     const handleCreateGenreFusionPlaylist = useCallback(async () => {
         if (selectedGenres.length < 1 || selectedGenres.length > 3) {
-            setCreatorError("Please select between 1 and 3 genres to fuse.");
+            setCreatorError("Please select between 1 and 3 genres.");
             return;
         }
         if (!genreFusionName.trim()) {
             setCreatorError("Please enter a name for your fusion playlist.");
             return;
         }
-
+    
         const controller = new AbortController();
         setGenreFusionAbortController(controller);
         const signal = controller.signal;
-
+    
         setIsGenreFusionLoading(true);
         setCreatorError('');
-        setCreatorStatus('Finding tracks for your genre fusion...');
-        
+        setCreatorStatus('Finding seed artists and tracks from your library...');
+    
         try {
-            const seed_genres = selectedGenres.join(',');
-            const response = await fetch(`https://api.spotify.com/v1/recommendations?limit=50&seed_genres=${seed_genres}`, {
+            // Fetch top artists and tracks to use as seeds
+            const topArtistsResponse = await fetch(`https://api.spotify.com/v1/me/top/artists?limit=2&time_range=short_term`, { headers: { Authorization: `Bearer ${token}` }, signal });
+            const topTracksResponse = await fetch(`https://api.spotify.com/v1/me/top/tracks?limit=3&time_range=short_term`, { headers: { Authorization: `Bearer ${token}` }, signal });
+    
+            if (!topArtistsResponse.ok || !topTracksResponse.ok) {
+                throw new Error('Could not fetch seed data from your library.');
+            }
+    
+            const topArtistsData = await topArtistsResponse.json();
+            const topTracksData = await topTracksResponse.json();
+    
+            const seed_artists = topArtistsData.items.map(artist => artist.id);
+            const seed_tracks = topTracksData.items.map(track => track.id);
+    
+            // Construct a query with a mix of seeds to ensure validity
+            let queryParams = new URLSearchParams({ limit: 50 });
+            queryParams.append('seed_genres', selectedGenres.join(','));
+    
+            const remainingSlots = 5 - selectedGenres.length;
+            const artistsToUse = seed_artists.slice(0, Math.floor(remainingSlots / 2));
+            const tracksToUse = seed_tracks.slice(0, remainingSlots - artistsToUse.length);
+    
+            if (artistsToUse.length > 0) {
+                 queryParams.append('seed_artists', artistsToUse.join(','));
+            }
+            if (tracksToUse.length > 0) {
+                 queryParams.append('seed_tracks', tracksToUse.join(','));
+            }
+    
+            setCreatorStatus('Getting recommendations from Spotify...');
+            const recommendationsResponse = await fetch(`https://api.spotify.com/v1/recommendations?${queryParams.toString()}`, {
                 headers: { Authorization: `Bearer ${token}` },
                 signal
             });
-
-            if (!response.ok) {
-                throw new Error(`Failed to get recommendations: ${response.status}`);
+    
+            if (!recommendationsResponse.ok) {
+                 throw new Error(`Failed to get recommendations: ${recommendationsResponse.status}`);
             }
-
-            const data = await response.json();
-            const trackUris = data.tracks.map(track => track.uri);
-
+    
+            const recommendationsData = await recommendationsResponse.json();
+            const trackUris = recommendationsData.tracks.map(track => track.uri);
+    
             if (trackUris.length === 0) {
                 throw new Error("Couldn't find any tracks for that genre combination. Try a different fusion!");
             }
@@ -825,20 +854,20 @@ export default function App() {
                 signal
             });
             const newPlaylist = await playlistResponse.json();
-
+    
             await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                 body: JSON.stringify({ uris: trackUris }),
                 signal
             });
-
+    
             setCreatedPlaylist(newPlaylist);
             setCreatorStatus("Genre Fusion playlist created successfully!");
             setLibraryVersion(v => v + 1);
             setSelectedGenres([]);
             setGenreFusionName("");
-
+    
         } catch (e) {
             if (e.name === 'AbortError') {
                 setCreatorStatus("Genre fusion playlist creation cancelled.");
