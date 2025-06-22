@@ -1223,22 +1223,48 @@ const useSpotifyApi = (url) => {
     const [error, setError] = useState(null);
     const [loading, setLoading] = useState(true);
 
+    const CACHE_DURATION_MS = 5 * 60 * 1000; // 5 minutes
+
     useEffect(() => {
-        let isMounted = true; // To prevent state updates on unmounted component
+        let isMounted = true; 
         const fetchData = async () => {
             if (!token || !url) {
                 if (isMounted) setLoading(false);
                 return;
             }
+
+            // --- Cache Read Attempt ---
+            try {
+                const cachedData = localStorage.getItem(url);
+                if (cachedData) {
+                    const { data: storedData, timestamp } = JSON.parse(cachedData);
+                    if (Date.now() - timestamp < CACHE_DURATION_MS) {
+                        if (isMounted) {
+                            setData(storedData);
+                            setLoading(false);
+                            // console.log(`[Cache Hit] for ${url}`); // For debugging cache hits
+                        }
+                        return; // Return from cache, no API call needed
+                    } else {
+                        // console.log(`[Cache Expired] for ${url}`); // For debugging expired cache
+                        localStorage.removeItem(url); // Clear expired cache
+                    }
+                }
+            } catch (cacheError) {
+                console.warn("Error reading from cache:", cacheError);
+                // Continue to fetch from API if cache read fails
+            }
+            // --- End Cache Read Attempt ---
+
+
             if (isMounted) setLoading(true);
 
             let retryCount = 0;
             const maxRetries = 3;
-            let currentDelay = 100; // Starting delay for initial fetch, a bit higher than 50ms used in internal loops
+            let currentDelay = 100; 
 
             while (retryCount <= maxRetries) {
                 try {
-                    // Introduce a delay before each actual API fetch, especially for initial playlist fetch
                     if (retryCount > 0 || url.includes('/me/playlists')) { 
                         await new Promise(resolve => setTimeout(resolve, currentDelay));
                     }
@@ -1257,28 +1283,37 @@ const useSpotifyApi = (url) => {
                     if (response.status === 429) {
                         const retryAfter = response.headers.get('Retry-After');
                         const delayBeforeRetry = retryAfter ? parseInt(retryAfter, 10) * 1000 : currentDelay * 2;
-                        console.warn(`Spotify API Rate Limit Hit (429). Retrying in ${delayBeforeRetry}ms... (Attempt ${retryCount + 1}/${maxRetries + 1})`);
+                        console.warn(`Spotify API Rate Limit Hit (429). Retrying in ${delayBeforeRetry}ms... (Attempt ${retryCount + 1}/${maxRetries + 1}) for ${url}`);
                         await new Promise(resolve => setTimeout(resolve, delayBeforeRetry));
-                        currentDelay = delayBeforeRetry; // Update currentDelay for subsequent retries
+                        currentDelay = delayBeforeRetry; 
                         retryCount++;
-                        continue; // Retry the request
+                        continue; 
                     }
                     if (!response.ok) {
                         throw new Error(`HTTP error! status: ${response.status}`);
                     }
                     const result = await response.json();
+                    
+                    // --- Cache Write Attempt ---
+                    try {
+                        localStorage.setItem(url, JSON.stringify({ data: result, timestamp: Date.now() }));
+                        // console.log(`[Cache Write] for ${url}`); // For debugging cache writes
+                    } catch (cacheError) {
+                        console.warn("Error writing to cache:", cacheError);
+                    }
+                    // --- End Cache Write Attempt ---
+
                     if (isMounted) {
                         setData(result);
                         setLoading(false);
                     }
-                    return; // Success, break out of loop
+                    return; 
                 } catch (e) {
                     if (isMounted) {
                         setError(e);
                         setLoading(false);
                     }
-                    console.error("useSpotifyApi fetch error:", e);
-                    // If not a 429 or max retries reached, break out of loop
+                    console.error(`useSpotifyApi fetch error for ${url}:`, e);
                     break;
                 }
             }
@@ -1287,9 +1322,9 @@ const useSpotifyApi = (url) => {
         fetchData();
 
         return () => {
-            isMounted = false; // Cleanup flag
+            isMounted = false; 
         };
-    }, [token, url, logout]); // Depend on token and url
+    }, [token, url, logout]); 
     return { data, error, loading };
 };
 
@@ -1331,7 +1366,8 @@ function PlaylistCard({ imageUrl, title, subtitle, isArtist = false, onClick }) 
 
 function HomePage() {
     const { setProfile } = useContext(AppContext);
-    const { data: profileData } = useSpotifyApi('/me');
+    // Added v parameter to force refresh on libraryVersion change
+    const { data: profileData } = useSpotifyApi('/me'); 
     const { data: topArtists, loading: artistsLoading, error: artistsError } = useSpotifyApi('/me/top/artists?limit=5');
     const { data: recent, loading: recentLoading, error: recentError } = useSpotifyApi('/me/player/recently-played?limit=6');
 
@@ -1359,7 +1395,7 @@ function HomePage() {
                             <img src={track.album.images[0]?.url || 'https://placehold.co/80x80/181818/FFFFFF?text=...'} alt={track.name} className="w-20 h-20 flex-shrink-0"/>
                             <p className="font-semibold text-white flex-1 pr-2">{track.name}</p>
                             <div className="mr-4 w-12 h-12 bg-green-500 rounded-full items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 shadow-xl hidden sm:flex">
-                             <svg className="w-6 h-6 text-black" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                             <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                             </div>
                        </div> 
                     ))}
