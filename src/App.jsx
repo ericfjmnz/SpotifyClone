@@ -206,6 +206,33 @@ export default function App() {
     const [selectedGenres, setSelectedGenres] = useState([]);
     const [genreFusionName, setGenreFusionName] = useState("");
 
+    const logout = useCallback(() => {
+        setToken(null);
+        if(player) player.disconnect();
+        window.localStorage.removeItem("spotify_token");
+        window.localStorage.removeItem("spotify_client_id");
+        window.localStorage.removeItem("code_verifier");
+        window.history.replaceState(null, null, window.location.pathname);
+        setView('home');
+        setSelectedPlaylistId(null);
+    }, [player]);
+    
+    const spotifyFetch = useCallback(async (endpoint, options = {}) => {
+        const response = await fetch(`https://api.spotify.com/v1${endpoint}`, {
+            ...options,
+            headers: {
+                ...options.headers,
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+        });
+        if (response.status === 401) {
+            logout();
+            throw new Error("User is not authenticated");
+        }
+        return response;
+    }, [token, logout]);
+
     // Effect to manage status message visibility (NO AUTO-HIDE)
     // The status message will only disappear when the "X" button is clicked.
     useEffect(() => {
@@ -271,6 +298,10 @@ export default function App() {
                     const response = await fetch(nextTracksUrl, {
                         headers: { Authorization: `Bearer ${token}` }, signal
                     });
+                    if (response.status === 401) {
+                        logout();
+                        throw new Error("User is not authenticated");
+                    }
                     if (!response.ok) {
                         console.warn(`Failed to fetch tracks for playlist "${playlist.name}" (${playlist.id}): ${response.status}`);
                         break;
@@ -292,7 +323,7 @@ export default function App() {
                 processedPlaylistsCount++;
             }
             return { uniqueTrackUris: Array.from(uniqueTrackUris), uniqueArtistIds: Array.from(uniqueArtistIds) };
-        }, [token]); // Dependency on token ensures this helper updates if token changes
+        }, [token, logout]); // Dependency on token ensures this helper updates if token changes
 
         return { fetchUniqueTrackUisAndArtistIdsFromPlaylists };
     };
@@ -331,9 +362,7 @@ export default function App() {
             
             const trackUris = [];
             for (const [index, track] of wqxrTracks.entries()) {
-                const response = await fetch(`https://api.spotify.com/v1/search?q=${encodeURIComponent(`track:${track.title} artist:${track.composer}`)}&type=track&limit=1`, {
-                    headers: { Authorization: `Bearer ${token}` }, signal
-                });
+                const response = await spotifyFetch(`/search?q=${encodeURIComponent(`track:${track.title} artist:${track.composer}`)}&type=track&limit=1`, { signal });
                 const searchData = await response.json();
                 if (searchData.tracks.items.length > 0) {
                     trackUris.push(searchData.tracks.items[0].uri);
@@ -347,17 +376,15 @@ export default function App() {
             
             setCreatorStatus('Creating new WQXR playlist...');
             const playlistName = `WQXR Daily - ${year}-${month}-${day}`;
-            const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
+            const playlistResponse = await spotifyFetch(`/users/${profile.id}/playlists`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`},
                 body: JSON.stringify({ name: playlistName, description: `A playlist of songs from WQXR on ${year}-${month}-${day}.`, public: false }), signal
             });
             const newPlaylist = await playlistResponse.json();
     
             setCreatorStatus('Adding tracks to the new WQXR playlist...');
-            await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
+            await spotifyFetch(`/playlists/${newPlaylist.id}/tracks`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                 body: JSON.stringify({ uris: trackUris }), signal
             });
             
@@ -377,7 +404,7 @@ export default function App() {
             setWqxrProgress(0);
             setWqxrAbortController(null); // Clear controller reference
         }
-    }, [profile, token, getYesterdayDateParts, setLibraryVersion]);
+    }, [profile, token, getYesterdayDateParts, setLibraryVersion, spotifyFetch]);
 
     const handleCancelWQXRPlaylist = useCallback(() => {
         wqxrAbortController?.abort(); // Abort the ongoing fetch
@@ -474,10 +501,7 @@ export default function App() {
     
                 for (const song of aiSuggestions) {
                     const query = encodeURIComponent(`track:${song.track} artist:${song.artist}`);
-                    const searchResponse = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, {
-                        headers: { Authorization: `Bearer ${token}` },
-                        signal
-                    });
+                    const searchResponse = await spotifyFetch(`/search?q=${query}&type=track&limit=1`, { signal });
                     const searchData = await searchResponse.json();
                     if (searchData.tracks.items.length > 0) {
                         allTrackUris.add(searchData.tracks.items[0].uri);
@@ -492,9 +516,8 @@ export default function App() {
             }
     
             setCreatorStatus(`Creating playlist "${customPlaylistName}"...`);
-            const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
+            const playlistResponse = await spotifyFetch(`/users/${profile.id}/playlists`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                 body: JSON.stringify({ name: customPlaylistName, description: `AI-generated playlist based on the prompt: "${aiPrompt}"`, public: false }),
                 signal
             });
@@ -504,9 +527,8 @@ export default function App() {
             const chunkSize = 100;
             for (let i = 0; i < uniqueTrackUris.length; i += chunkSize) {
                 const chunk = uniqueTrackUris.slice(i, i + chunkSize);
-                await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
+                await spotifyFetch(`/playlists/${newPlaylist.id}/tracks`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                     body: JSON.stringify({ uris: chunk }),
                     signal
                 });
@@ -529,7 +551,7 @@ export default function App() {
             setIsCustomLoading(false);
             setCustomAbortController(null);
         }
-    }, [profile, token, customPlaylistName, aiPrompt, setLibraryVersion, resetCustomForm]);
+    }, [profile, token, customPlaylistName, aiPrompt, setLibraryVersion, resetCustomForm, spotifyFetch]);
 
     const handleCancelAiPlaylist = useCallback(() => {
         customAbortController?.abort();
@@ -552,9 +574,7 @@ export default function App() {
 
         try {
             const fetchTopTracksPage = async (offset) => {
-                const response = await fetch(`https://api.spotify.com/v1/me/top/tracks?limit=50&offset=${offset}&time_range=long_term`, {
-                    headers: { Authorization: `Bearer ${token}` }, signal
-                });
+                const response = await spotifyFetch(`/me/top/tracks?limit=50&offset=${offset}&time_range=long_term`, { signal });
                 if (!response.ok) {
                     throw new Error(`Failed to fetch top tracks page (offset ${offset}): ${response.status}`);
                 }
@@ -583,19 +603,16 @@ export default function App() {
 
             setCreatorStatus(`Found ${trackUris.length} top tracks. Creating playlist...`);
             const playlistName = `My Top 100 Tracks - ${new Date().toLocaleDateString()}`;
-            const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
+            const playlistResponse = await spotifyFetch(`/users/${profile.id}/playlists`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                 body: JSON.stringify({ name: playlistName, description: 'A playlist generated from your top 100 Spotify tracks.', public: false }), signal
             });
             setTopTracksProgress(75);
             const newPlaylist = await playlistResponse.json();
 
             setCreatorStatus('Adding tracks to your new top tracks playlist...');
-            // Spotify's add tracks to playlist endpoint can handle up to 100 URIs per request.
-            await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
+            await spotifyFetch(`/playlists/${newPlaylist.id}/tracks`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                 body: JSON.stringify({ uris: trackUris }), signal
             });
             setTopTracksProgress(100);
@@ -615,7 +632,7 @@ export default function App() {
             setTopTracksProgress(0);
             setTopTracksAbortController(null); // Clear controller reference
         }
-    }, [profile, token, setLibraryVersion]);
+    }, [profile, token, setLibraryVersion, spotifyFetch]);
 
     const handleCancelTopTracksPlaylist = useCallback(() => {
         topTracksAbortController?.abort();
@@ -661,9 +678,8 @@ export default function App() {
                 const description = `Part ${p + 1} of a playlist containing all unique songs from your Spotify playlists.`;
 
                 setCreatorStatus(`Creating playlist "${playlistName}" (${p + 1}/${numberOfPlaylists}) (15-${90 * (p + 1) / numberOfPlaylists}%)...`); // Dynamic status
-                const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
+                const playlistResponse = await spotifyFetch(`/users/${profile.id}/playlists`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                     body: JSON.stringify({ name: playlistName, description: description, public: false }), signal
                 });
 
@@ -678,9 +694,8 @@ export default function App() {
                 const chunkSizeForAdding = 100;
                 for (let i = 0; i < currentChunkOfTracks.length; i += chunkSizeForAdding) {
                     const chunk = currentChunkOfTracks.slice(i, i + chunkSizeForAdding);
-                    const addTracksResponse = await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
+                    const addTracksResponse = await spotifyFetch(`/playlists/${newPlaylist.id}/tracks`, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                         body: JSON.stringify({ uris: chunk }), signal
                     });
 
@@ -713,7 +728,7 @@ export default function App() {
             setAllSongsProgress(0);
             setAllSongsAbortController(null); // Clear controller reference
         }
-    }, [profile, token, setLibraryVersion, fetchUniqueTrackUisAndArtistIdsFromPlaylists]);
+    }, [profile, token, setLibraryVersion, fetchUniqueTrackUisAndArtistIdsFromPlaylists, spotifyFetch]);
 
     const handleCancelAllSongsPlaylist = useCallback(() => {
         allSongsAbortController?.abort();
@@ -745,9 +760,7 @@ export default function App() {
             const batchSize = 50;
             for (let i = 0; i < uniqueArtistIds.length; i += batchSize) {
                 const batch = uniqueArtistIds.slice(i, i + batchSize);
-                const response = await fetch(`https://api.spotify.com/v1/artists?ids=${batch.join(',')}`, {
-                    headers: { Authorization: `Bearer ${token}` }, signal
-                });
+                const response = await spotifyFetch(`/artists?ids=${batch.join(',')}`, { signal });
                 if (!response.ok) {
                     console.warn(`Failed to fetch artist batch: ${response.status}`);
                     continue;
@@ -775,7 +788,7 @@ export default function App() {
             setIsGenreFusionLoading(false);
             setGenreFusionProgress(0);
         }
-    }, [profile, token, fetchUniqueTrackUisAndArtistIdsFromPlaylists]);
+    }, [profile, token, fetchUniqueTrackUisAndArtistIdsFromPlaylists, spotifyFetch]);
 
     const handleCreateGenreFusionPlaylist = useCallback(async () => {
         if (selectedGenres.length < 1 || selectedGenres.length > 3) {
@@ -797,8 +810,8 @@ export default function App() {
     
         try {
             // Fetch top artists and tracks to use as seeds
-            const topArtistsResponse = await fetch(`https://api.spotify.com/v1/me/top/artists?limit=2&time_range=short_term`, { headers: { Authorization: `Bearer ${token}` }, signal });
-            const topTracksResponse = await fetch(`https://api.spotify.com/v1/me/top/tracks?limit=3&time_range=short_term`, { headers: { Authorization: `Bearer ${token}` }, signal });
+            const topArtistsResponse = await spotifyFetch(`/me/top/artists?limit=2&time_range=short_term`, { signal });
+            const topTracksResponse = await spotifyFetch(`/me/top/tracks?limit=3&time_range=short_term`, { signal });
     
             if (!topArtistsResponse.ok || !topTracksResponse.ok) {
                 throw new Error('Could not fetch seed data from your library.');
@@ -826,10 +839,7 @@ export default function App() {
             }
     
             setCreatorStatus('Getting recommendations from Spotify...');
-            const recommendationsResponse = await fetch(`https://api.spotify.com/v1/recommendations?${queryParams.toString()}`, {
-                headers: { Authorization: `Bearer ${token}` },
-                signal
-            });
+            const recommendationsResponse = await spotifyFetch(`/recommendations?${queryParams.toString()}`, { signal });
     
             if (!recommendationsResponse.ok) {
                  throw new Error(`Failed to get recommendations: ${recommendationsResponse.status}`);
@@ -843,9 +853,8 @@ export default function App() {
             }
             
             setCreatorStatus(`Creating playlist "${genreFusionName}"...`);
-            const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
+            const playlistResponse = await spotifyFetch(`/users/${profile.id}/playlists`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                 body: JSON.stringify({
                     name: genreFusionName,
                     description: `A fusion of ${selectedGenres.join(', ')}. Created by your app.`,
@@ -855,9 +864,8 @@ export default function App() {
             });
             const newPlaylist = await playlistResponse.json();
     
-            await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
+            await spotifyFetch(`/playlists/${newPlaylist.id}/tracks`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                 body: JSON.stringify({ uris: trackUris }),
                 signal
             });
@@ -879,22 +887,11 @@ export default function App() {
             setIsGenreFusionLoading(false);
             setGenreFusionAbortController(null);
         }
-    }, [profile, token, selectedGenres, genreFusionName, setLibraryVersion]);
+    }, [profile, token, selectedGenres, genreFusionName, setLibraryVersion, spotifyFetch]);
 
     const handleCancelGenreFusion = useCallback(() => {
         genreFusionAbortController?.abort();
     }, [genreFusionAbortController]);
-
-    const logout = useCallback(() => {
-        setToken(null);
-        if(player) player.disconnect();
-        window.localStorage.removeItem("spotify_token");
-        window.localStorage.removeItem("spotify_client_id");
-        window.localStorage.removeItem("code_verifier");
-        window.history.replaceState(null, null, window.location.pathname);
-        setView('home');
-        setSelectedPlaylistId(null);
-    }, [player]);
 
     // Effect for loading external Spotify SDK and Tailwind CSS.
     useEffect(() => {
@@ -1026,7 +1023,8 @@ export default function App() {
             isTopTracksLoading, topTracksProgress, handleCreateTopTracksPlaylist, handleCancelTopTracksPlaylist,
             isAllSongsLoading, allSongsProgress, handleCreateAllSongsPlaylist, handleCancelAllSongsPlaylist,
             isGenreFusionLoading, genreFusionProgress, handleFetchAvailableGenres, handleCreateGenreFusionPlaylist, handleCancelGenreFusion, availableGenres, selectedGenres, setSelectedGenres, genreFusionName, setGenreFusionName,
-            getYesterdayDateParts // Pass getYesterdayDateParts to context
+            getYesterdayDateParts, // Pass getYesterdayDateParts to context
+            spotifyFetch
         }}>
             <div className="h-screen w-full flex flex-col bg-black text-white font-sans">
                 <div className="flex flex-1 overflow-y-hidden">
@@ -1270,7 +1268,7 @@ function PlayerBar() {
 // --- API Fetch Hook ---
 // A custom hook to simplify making authenticated requests to the Spotify API.
 const useSpotifyApi = (url) => {
-    const { token, logout } = useContext(AppContext);
+    const { spotifyFetch } = useContext(AppContext);
     const [data, setData] = useState(null);
     const [error, setError] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -1280,7 +1278,7 @@ const useSpotifyApi = (url) => {
     useEffect(() => {
         let isMounted = true;
         const fetchData = async () => {
-            if (!token || !url) {
+            if (!spotifyFetch || !url) {
                 if (isMounted) setLoading(false);
                 return;
             }
@@ -1294,79 +1292,46 @@ const useSpotifyApi = (url) => {
                         if (isMounted) {
                             setData(storedData);
                             setLoading(false);
-                            // console.log(`[Cache Hit] for ${url}`); // For debugging cache hits
+                            return; 
                         }
-                        return; // Return from cache, no API call needed
                     } else {
-                        // console.log(`[Cache Expired] for ${url}`); // For debugging expired cache
-                        localStorage.removeItem(url); // Clear expired cache
+                        localStorage.removeItem(url); 
                     }
                 }
             } catch (cacheError) {
                 console.warn("Error reading from cache:", cacheError);
-                // Continue to fetch from API if cache read fails
             }
             // --- End Cache Read Attempt ---
 
 
             if (isMounted) setLoading(true);
 
-            let retryCount = 0;
-            const maxRetries = 3;
-            let currentDelay = 100;
-
-            while (retryCount <= maxRetries) {
+            try {
+                const response = await spotifyFetch(url);
+                 if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                 }
+                const result = await response.json();
+                
+                // --- Cache Write Attempt ---
                 try {
-                    if (retryCount > 0 || url.includes('/me/playlists')) {
-                        await new Promise(resolve => setTimeout(resolve, currentDelay));
-                    }
-                    
-                    const cacheBustedUrl = `${url}${url.includes('?') ? '&' : '?'}t=${new Date().getTime()}`;
-                    const response = await fetch(`https://api.spotify.com/v1${cacheBustedUrl}`, {
-                        headers: {
-                            Authorization: `Bearer ${token}`,
-                        }
-                    });
+                    localStorage.setItem(url, JSON.stringify({ data: result, timestamp: Date.now() }));
+                } catch (cacheError) {
+                    console.warn("Error writing to cache:", cacheError);
+                }
+                // --- End Cache Write Attempt ---
 
-                    if (response.status === 401) {
-                        if (isMounted) logout();
-                        return;
-                    }
-                    if (response.status === 429) {
-                        const retryAfter = response.headers.get('Retry-After');
-                        const delayBeforeRetry = retryAfter ? parseInt(retryAfter, 10) * 1000 : currentDelay * 2;
-                        console.warn(`Spotify API Rate Limit Hit (429). Retrying in ${delayBeforeRetry}ms... (Attempt ${retryCount + 1}/${maxRetries + 1}) for ${url}`);
-                        await new Promise(resolve => setTimeout(resolve, delayBeforeRetry));
-                        currentDelay = delayBeforeRetry;
-                        retryCount++;
-                        continue;
-                    }
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-                    const result = await response.json();
-                    
-                    // --- Cache Write Attempt ---
-                    try {
-                        localStorage.setItem(url, JSON.stringify({ data: result, timestamp: Date.now() }));
-                        // console.log(`[Cache Write] for ${url}`); // For debugging cache writes
-                    } catch (cacheError) {
-                        console.warn("Error writing to cache:", cacheError);
-                    }
-                    // --- End Cache Write Attempt ---
-
-                    if (isMounted) {
-                        setData(result);
-                        setLoading(false);
-                    }
-                    return;
-                } catch (e) {
-                    if (isMounted) {
-                        setError(e);
-                        setLoading(false);
-                    }
-                    console.error(`useSpotifyApi fetch error for ${url}:`, e);
-                    break;
+                if (isMounted) {
+                    setData(result);
+                }
+            } catch (e) {
+                if (isMounted && e.name !== 'AbortError') {
+                    setError(e);
+                }
+                console.error(`useSpotifyApi fetch error for ${url}:`, e);
+            } finally {
+                if(isMounted){
+                    setLoading(false);
                 }
             }
         };
@@ -1376,7 +1341,7 @@ const useSpotifyApi = (url) => {
         return () => {
             isMounted = false;
         };
-    }, [token, url, logout]);
+    }, [url, spotifyFetch]);
     return { data, error, loading };
 };
 
@@ -1473,7 +1438,7 @@ function HomePage() {
 
 function PlaylistView({ playlistId }) {
     const { data: playlist, loading } = useSpotifyApi(`/playlists/${playlistId}`);
-    const { token, deviceId, currentTrack, isPaused, setView, setSelectedPlaylistId } = useContext(AppContext);
+    const { spotifyFetch, deviceId, currentTrack, isPaused, setView, setSelectedPlaylistId } = useContext(AppContext);
     const [error, setError] = useState(null);
 
     const playTrack = async (trackUri) => {
@@ -1482,12 +1447,8 @@ function PlaylistView({ playlistId }) {
             return;
         }
         setError(null);
-        await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
+        await spotifyFetch(`/me/player/play?device_id=${deviceId}`, {
             method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-            },
             body: JSON.stringify({ uris: [trackUri] })
         });
     };
@@ -1815,7 +1776,7 @@ function PlaylistCreator() {
 // --- NEW --- SearchView Component
 // A new component to handle search functionality.
 function SearchView() {
-    const { token } = useContext(AppContext);
+    const { spotifyFetch } = useContext(AppContext);
     const [query, setQuery] = useState("");
     const [results, setResults] = useState(null);
     const [loading, setLoading] = useState(false);
@@ -1831,16 +1792,14 @@ function SearchView() {
             setLoading(true);
             const searchQuery = encodeURIComponent(query);
             const type = "track,artist,album";
-            const response = await fetch(`https://api.spotify.com/v1/search?q=${searchQuery}&type=${type}&limit=10`, {
-                   headers: { Authorization: `Bearer ${token}` }
-            });
+            const response = await spotifyFetch(`/search?q=${searchQuery}&type=${type}&limit=10`);
             const data = await response.json();
             setResults(data);
             setLoading(false);
         }, 500); // 500ms delay
 
         return () => clearTimeout(searchTimer);
-    }, [query, token]);
+    }, [query, spotifyFetch]);
 
     return (
         <div className="space-y-8">
@@ -1919,16 +1878,15 @@ function AlbumResults({ albums }) {
 
 // Custom hook to abstract player logic
 function usePlayerActions() {
-    const { token, deviceId } = useContext(AppContext);
+    const { spotifyFetch, deviceId } = useContext(AppContext);
     const playTrack = (trackUri) => {
         if (!deviceId) {
             // In a real app, you'd show a non-blocking notification here.
             console.error("No active player found.");
             return;
         }
-        fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
+        spotifyFetch(`/me/player/play?device_id=${deviceId}`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify({ uris: [trackUri] })
         });
     }
@@ -1937,7 +1895,7 @@ function usePlayerActions() {
 
 
 function EditPlaylistModal({ playlist, onClose }) {
-    const { token, setLibraryVersion } = useContext(AppContext);
+    const { spotifyFetch, setLibraryVersion } = useContext(AppContext);
     const [name, setName] = useState(playlist.name);
     const [description, setDescription] = useState(playlist.description || "");
     const [isSaving, setIsSaving] = useState(false);
@@ -1948,12 +1906,8 @@ function EditPlaylistModal({ playlist, onClose }) {
         setIsSaving(true);
         setError("");
         try {
-            const response = await fetch(`https://api.spotify.com/v1/playlists/${playlist.id}`, {
+            const response = await spotifyFetch(`/playlists/${playlist.id}`, {
                 method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${token}`
-                },
                 body: JSON.stringify({ name, description })
             });
              if (!response.ok) {
@@ -2002,7 +1956,7 @@ function EditPlaylistModal({ playlist, onClose }) {
 
 
 function DeleteConfirmationModal({ playlist, onClose }) {
-    const { token, setLibraryVersion, setView, setSelectedPlaylistId } = useContext(AppContext);
+    const { spotifyFetch, setLibraryVersion, setView, setSelectedPlaylistId } = useContext(AppContext);
     const [isDeleting, setIsDeleting] = useState(false);
     const [error, setError] = useState("");
     
@@ -2011,9 +1965,8 @@ function DeleteConfirmationModal({ playlist, onClose }) {
         setError("");
         try {
             // Unfollowing a playlist is the standard way to "delete" it from a user's library
-            const response = await fetch(`https://api.spotify.com/v1/playlists/${playlist.id}/followers`, {
+            const response = await spotifyFetch(`/playlists/${playlist.id}/followers`, {
                 method: 'DELETE',
-                headers: { Authorization: `Bearer ${token}` }
             });
              if (!response.ok) {
                 const errorData = await response.json();
