@@ -237,8 +237,8 @@ export default function App() {
 
     // NEW: Custom hook for data fetching helpers
     const useSpotifyDataHelpers = (token) => {
-        // fetchUniqueTrackUrisAndArtistIdsFromPlaylists is now directly defined here
-        const fetchUniqueTrackUrisAndArtistIdsFromPlaylists = useCallback(async (signal) => {
+        // fetchUniqueTrackUisAndArtistIdsFromPlaylists is now directly defined here
+        const fetchUniqueTrackUisAndArtistIdsFromPlaylists = useCallback(async (signal) => {
             let allPlaylists = [];
             let nextPlaylistsUrl = 'https://api.spotify.com/v1/me/playlists?limit=50'; 
 
@@ -292,11 +292,11 @@ export default function App() {
             return { uniqueTrackUris: Array.from(uniqueTrackUris), uniqueArtistIds: Array.from(uniqueArtistIds) };
         }, [token]); // Dependency on token ensures this helper updates if token changes
 
-        return { fetchUniqueTrackUrisAndArtistIdsFromPlaylists };
+        return { fetchUniqueTrackUisAndArtistIdsFromPlaylists };
     };
 
     // Use the new hook at the top level of the App component
-    const { fetchUniqueTrackUrisAndArtistIdsFromPlaylists } = useSpotifyDataHelpers(token);
+    const { fetchUniqueTrackUisAndArtistIdsFromPlaylists } = useSpotifyDataHelpers(token);
 
 
     const handleCreateWQXRPlaylist = useCallback(async () => {
@@ -599,6 +599,7 @@ export default function App() {
         setCreatorStatus('Fetching all your playlists (0-15%)...');
 
         try {
+            // Using the helper function here
             const { uniqueTrackUris } = await fetchUniqueTrackUisAndArtistIdsFromPlaylists(signal);
             const trackUrisArray = uniqueTrackUris; // Already an array from helper
 
@@ -681,7 +682,7 @@ export default function App() {
 
     const handleCreateGenreMixPlaylist = useCallback(async () => {
         if (!profile) {
-            setCreatorError('Could not get user profile. Please try again.');
+            setCreatorError('Could not get user user profile. Please try again.');
             return;
         }
         const controller = new AbortController();
@@ -696,9 +697,10 @@ export default function App() {
 
         try {
             // Phase 1: Collect unique track URIs and artist IDs
+            // Using the helper function here
             const { uniqueTrackUris, uniqueArtistIds } = await fetchUniqueTrackUisAndArtistIdsFromPlaylists(signal);
             
-            if (uniqueTrackUis.length === 0) {
+            if (uniqueTrackUris.length === 0) {
                 throw new Error('Could not find any unique songs across your playlists to determine genres.');
             }
 
@@ -747,7 +749,7 @@ export default function App() {
             setGenreMixProgress(0);
             setGenreMixAbortController(null);
         }
-    }, [profile, token, fetchUniqueTrackUrisAndArtistIdsFromPlaylists]);
+    }, [profile, token, fetchUniqueTrackUisAndArtistIdsFromPlaylists]);
 
     const handleCancelGenreMixPlaylist = useCallback(() => {
         genreMixAbortController?.abort();
