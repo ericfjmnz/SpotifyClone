@@ -243,6 +243,10 @@ export default function App() {
         setAiPrompt('');
     }, []);
 
+    // Helper function to introduce a delay
+    const delay = (ms) => new Promise(res => setTimeout(res, ms));
+
+
     // Helper to fetch all unique track URIs and artist IDs from user's playlists
     const fetchUniqueTrackUrisAndArtistIdsFromPlaylists = useCallback(async (signal) => {
         let allPlaylists = [];
@@ -258,6 +262,7 @@ export default function App() {
             const data = await response.json();
             allPlaylists = allPlaylists.concat(data.items);
             nextPlaylistsUrl = data.next; 
+            await delay(50); // Add a small delay between playlist page fetches
         }
 
         if (allPlaylists.length === 0) {
@@ -290,6 +295,7 @@ export default function App() {
                     });
                 }
                 nextTracksUrl = data.next; 
+                await delay(50); // Add a small delay between track page fetches for each playlist
             }
             processedPlaylistsCount++;
         }
@@ -336,6 +342,7 @@ export default function App() {
                 }
                 const progress = ((index + 1) / wqxrTracks.length) * 100;
                 setWqxrProgress(progress);
+                await delay(50); // Delay for search requests
             }
     
             if (trackUris.length === 0) throw new Error('Could not find any of the WQXR tracks on Spotify.');
@@ -466,6 +473,7 @@ export default function App() {
                 if (searchData.tracks.items.length > 0) {
                     trackUris.push(searchData.tracks.items[0].uri);
                 }
+                await delay(50); // Delay for search requests
             }));
 
             if (trackUris.length === 0) {
@@ -592,7 +600,7 @@ export default function App() {
         setCreatorError('');
         setCreatedPlaylist(null);
         setAllSongsProgress(0);
-        setCreatorStatus('Fetching all your playlists. This may take a while...');
+        setCreatorStatus('Fetching all your playlists (0-15%)...');
 
         try {
             const { uniqueTrackUris } = await fetchUniqueTrackUrisAndArtistIdsFromPlaylists(signal);
@@ -602,6 +610,7 @@ export default function App() {
                 throw new Error('Could not find any unique songs across your playlists.');
             }
 
+            setAllSongsProgress(15); // After initial playlist and track fetching
             const SPOTIFY_PLAYLIST_LIMIT = 10000; // Spotify's maximum playlist size
             const totalSongs = trackUrisArray.length;
             const numberOfPlaylists = Math.ceil(totalSongs / SPOTIFY_PLAYLIST_LIMIT);
@@ -615,7 +624,7 @@ export default function App() {
                 const playlistName = `All My Playlists Songs - Part ${p + 1} - ${new Date().toLocaleDateString()}`;
                 const description = `Part ${p + 1} of a playlist containing all unique songs from your Spotify playlists.`;
 
-                setCreatorStatus(`Creating playlist "${playlistName}" (${p + 1}/${numberOfPlaylists})...`);
+                setCreatorStatus(`Creating playlist "${playlistName}" (${p + 1}/${numberOfPlaylists}) (15-${90 * (p + 1) / numberOfPlaylists}%)...`); // Dynamic status
                 const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -629,7 +638,7 @@ export default function App() {
                 const newPlaylist = await playlistResponse.json();
                 createdPlaylistsInfo.push(newPlaylist);
 
-                setCreatorStatus(`Adding ${currentChunkOfTracks.length} songs to "${newPlaylist.name}"...`);
+                setCreatorStatus(`Adding ${currentChunkOfTracks.length} songs to "${newPlaylist.name}" (part ${p + 1}) (Up to ${90 * (p + 1) / numberOfPlaylists}%)...`); // Dynamic status
                 const chunkSizeForAdding = 100;
                 for (let i = 0; i < currentChunkOfTracks.length; i += chunkSizeForAdding) {
                     const chunk = currentChunkOfTracks.slice(i, i + chunkSizeForAdding);
@@ -644,11 +653,14 @@ export default function App() {
                         console.error(`Error adding tracks chunk to playlist ${newPlaylist.name}:`, errorBody);
                         throw new Error(`Failed to add tracks to playlist "${newPlaylist.name}": ${addTracksResponse.status} - ${errorBody.error?.message || 'Unknown error'}`);
                     }
-                    const overallProgress = ((startIdx + i + chunk.length) / totalSongs) * 100;
-                    setAllSongsProgress(overallProgress);
+                    // Calculate overall progress more accurately across all parts
+                    const currentOverallProgress = (startIdx + i + chunk.length);
+                    setAllSongsProgress((currentOverallProgress / totalSongs) * 90 + 10); // Scale 0-90% for adding, leaving 10% for finalization
+                    await delay(50); // Delay for adding tracks
                 }
             }
             
+            setAllSongsProgress(100); // Final progress update
             setCreatedPlaylist(createdPlaylistsInfo[0]); 
             setCreatorStatus(`Successfully created ${numberOfPlaylists} playlist(s)!`);
             setLibraryVersion(v => v + 1); 
@@ -684,7 +696,7 @@ export default function App() {
         setCreatorError('');
         setCreatedPlaylist(null);
         setGenreMixProgress(0);
-        setCreatorStatus('Collecting unique songs and artists from your playlists (15%)...'); // Initial progress
+        setCreatorStatus('Collecting unique songs and artists from your playlists (Phase 1/5: 0-15%)...'); // Initial progress
 
         try {
             // Phase 1: Collect unique track URIs and artist IDs
@@ -695,12 +707,13 @@ export default function App() {
             }
 
             setGenreMixProgress(15); 
-            setCreatorStatus(`Found ${uniqueArtistIds.length} unique artists. Fetching their genres (15-60%)...`);
+            setCreatorStatus(`Found ${uniqueArtistIds.length} unique artists. Fetching their genres (Phase 2/5: 15-60%)...`);
 
             // Phase 2: Fetch genres for unique artists
             const uniqueGenres = new Set();
             const artistBatchSize = 50; // Max artist IDs per request
-            for (let i = 0; i < uniqueArtistIds.length; i += artistBatchSize) {
+            const totalArtists = uniqueArtistIds.length;
+            for (let i = 0; i < totalArtists; i += artistBatchSize) {
                 const batch = uniqueArtistIds.slice(i, i + artistBatchSize);
                 const artistsResponse = await fetch(`https://api.spotify.com/v1/artists?ids=${batch.join(',')}`, {
                     headers: { Authorization: `Bearer ${token}` }, signal
@@ -714,24 +727,25 @@ export default function App() {
                 artistsData.artists.forEach(artist => {
                     artist?.genres?.forEach(genre => uniqueGenres.add(genre));
                 });
-                setGenreMixProgress(15 + (i / uniqueArtistIds.length) * 45); // Progress for artist fetching (15-60%)
+                setGenreMixProgress(15 + (i / totalArtists) * 45); // Progress for artist fetching (15-60%)
+                await delay(50); // Delay for artist batch fetches
             }
 
             setGenreMixProgress(60); 
-            setCreatorStatus(`Found ${uniqueGenres.size} unique genres. Fetching available genre seeds (60-70%)...`);
+            setCreatorStatus(`Found ${uniqueGenres.size} unique genres. Fetching available genre seeds (Phase 3/5: 60-70%)...`);
 
             // Phase 3: Fetch available genre seeds
             const availableGenreSeedsResponse = await fetch(`https://api.spotify.com/v1/recommendations/available-genre-seeds`, {
                 headers: { Authorization: `Bearer ${token}` }, signal
             });
             if (!availableGenreSeedsResponse.ok) {
-                throw new Error(`Failed to fetch available genre seeds: ${availableGenreSeedsResponse.status}`);
+                throw new Error(`Failed to fetch available genre seeds: ${availableGenreSeedsResponse.status}. This might be a temporary Spotify API issue.`);
             }
             const availableGenreSeedsData = await availableGenreSeedsResponse.json();
             const validGenreSeeds = availableGenreSeedsData.genres;
 
             setGenreMixProgress(70); 
-            setCreatorStatus('Filtering and selecting relevant genre seeds (70-80%)...');
+            setCreatorStatus('Filtering and selecting relevant genre seeds (Phase 4/5: 70-80%)...');
 
             // Phase 4: Filter and select valid genre seeds from user's music
             const relevantGenreSeeds = Array.from(uniqueGenres).filter(genre => validGenreSeeds.includes(genre));
@@ -743,7 +757,7 @@ export default function App() {
             }
 
             setGenreMixProgress(80); 
-            setCreatorStatus(`Generating recommendations based on your genres: ${selectedGenreSeeds.join(', ')} (80-90%)...`);
+            setCreatorStatus(`Generating recommendations based on your genres: ${selectedGenreSeeds.join(', ')} (Phase 5/5: 80-90%)...`);
 
             // Phase 5: Get recommendations
             const recommendationsResponse = await fetch(`https://api.spotify.com/v1/recommendations?limit=50&seed_genres=${selectedGenreSeeds.join(',')}`, {
@@ -793,6 +807,7 @@ export default function App() {
                     throw new Error(`Failed to add recommended tracks to playlist "${newPlaylist.name}": ${addTracksResponse.status} - ${errorBody.error?.message || 'Unknown error'}`);
                 }
                 setGenreMixProgress(90 + (i / recommendedTrackUris.length) * 10); // Progress from 90% to 100%
+                await delay(50); // Delay for adding tracks
             }
 
             setCreatedPlaylist(newPlaylist);
