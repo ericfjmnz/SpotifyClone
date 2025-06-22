@@ -216,7 +216,7 @@ export default function App() {
         setCreatorStatus('Requesting playlist from proxy server...');
 
         try {
-            const { year, month, day } = getYesterdayDateParts();
+            const { year, month, day } = getYesterdayDateParts(); // Destructure here
             const proxyResponse = await fetch(`http://localhost:3001/wqxr-playlist?year=${year}&month=${month}&day=${day}`);
             
             if (!proxyResponse.ok) throw new Error('Failed to fetch data from proxy server. Make sure it is running.');
@@ -245,11 +245,11 @@ export default function App() {
             if (trackUris.length === 0) throw new Error('Could not find any of the WQXR tracks on Spotify.');
             
             setCreatorStatus('Creating new WQXR playlist...');
-            const playlistName = `WQXR Daily - ${year}-${month}-${day}`; // Use the destructured values
+            const playlistName = `WQXR Daily - ${year}-${month}-${day}`; 
             const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`},
-                body: JSON.stringify({ name: playlistName, description: `A playlist of songs from WQXR on ${year}-${month}-${day}.`, public: false }) // Use destructured values
+                body: JSON.stringify({ name: playlistName, description: `A playlist of songs from WQXR on ${year}-${month}-${day}.`, public: false }) 
             });
             const newPlaylist = await playlistResponse.json();
     
@@ -721,7 +721,8 @@ export default function App() {
             isWqxrLoading, wqxrProgress, handleCreateWQXRPlaylist,
             isCustomLoading, customPlaylistName, setCustomPlaylistName, aiPrompt, setAiPrompt, handleCreateAiPlaylist, resetCustomForm,
             isTopTracksLoading, topTracksProgress, handleCreateTopTracksPlaylist,
-            isAllSongsLoading, allSongsProgress, handleCreateAllSongsPlaylist
+            isAllSongsLoading, allSongsProgress, handleCreateAllSongsPlaylist,
+            getYesterdayDateParts // Pass getYesterdayDateParts to context
         }}>
             <div className="h-screen w-full flex flex-col bg-black text-white font-sans">
                 <div className="flex flex-1 overflow-y-hidden">
