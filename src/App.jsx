@@ -272,8 +272,9 @@ export default function App() {
             let nextPlaylistsUrl = 'https://api.spotify.com/v1/me/playlists?limit=50';
 
             while (nextPlaylistsUrl) {
-                const response = await spotifyFetch(nextPlaylistsUrl.replace('https://api.spotify.com/v1', ''), { signal });
-
+                const response = await fetch(nextPlaylistsUrl, {
+                    headers: { Authorization: `Bearer ${token}` }, signal
+                });
                 if (!response.ok) {
                     throw new Error(`Failed to fetch playlists: ${response.status}`);
                 }
@@ -292,10 +293,15 @@ export default function App() {
             let processedPlaylistsCount = 0;
 
             for (const playlist of allPlaylists) {
-                let nextTracksUrl = playlist.tracks.href;
+                let nextTracksUrl = `https://api.spotify.com/v1/playlists/${playlist.id}/tracks?limit=100`;
                 while (nextTracksUrl) {
-                    const response = await spotifyFetch(nextTracksUrl.replace('https://api.spotify.com/v1', ''), { signal });
-                    
+                    const response = await fetch(nextTracksUrl, {
+                        headers: { Authorization: `Bearer ${token}` }, signal
+                    });
+                    if (response.status === 401) {
+                        logout();
+                        throw new Error("User is not authenticated");
+                    }
                     if (!response.ok) {
                         console.warn(`Failed to fetch tracks for playlist "${playlist.name}" (${playlist.id}): ${response.status}`);
                         break;
@@ -317,7 +323,7 @@ export default function App() {
                 processedPlaylistsCount++;
             }
             return { uniqueTrackUris: Array.from(uniqueTrackUris), uniqueArtistIds: Array.from(uniqueArtistIds) };
-        }, [token, spotifyFetch]); // Dependency on token ensures this helper updates if token changes
+        }, [token, logout]); // Dependency on token ensures this helper updates if token changes
 
         return { fetchUniqueTrackUisAndArtistIdsFromPlaylists };
     };
@@ -804,8 +810,8 @@ export default function App() {
     
         try {
             // Fetch top artists and tracks to use as seeds
-            const topArtistsResponse = await spotifyFetch(`/me/top/artists?limit=5&time_range=short_term`, { signal });
-            const topTracksResponse = await spotifyFetch(`/me/top/tracks?limit=5&time_range=short_term`, { signal });
+            const topArtistsResponse = await spotifyFetch(`/me/top/artists?limit=2&time_range=short_term`, { signal });
+            const topTracksResponse = await spotifyFetch(`/me/top/tracks?limit=3&time_range=short_term`, { signal });
     
             if (!topArtistsResponse.ok || !topTracksResponse.ok) {
                 throw new Error('Could not fetch seed data from your library.');
@@ -819,25 +825,16 @@ export default function App() {
     
             // Construct a query with a mix of seeds to ensure validity
             let queryParams = new URLSearchParams({ limit: 50 });
-            
-            // Spotify allows up to 5 total seeds. We'll use a mix.
-            const totalSeeds = 5;
-            let seedCount = 0;
-            
-            const genresToUse = selectedGenres.slice(0, totalSeeds);
-            if(genresToUse.length > 0){
-                queryParams.append('seed_genres', genresToUse.join(','));
-                seedCount += genresToUse.length;
+            queryParams.append('seed_genres', selectedGenres.join(','));
+    
+            const remainingSlots = 5 - selectedGenres.length;
+            const artistsToUse = seed_artists.slice(0, Math.floor(remainingSlots / 2));
+            const tracksToUse = seed_tracks.slice(0, remainingSlots - artistsToUse.length);
+    
+            if (artistsToUse.length > 0) {
+                 queryParams.append('seed_artists', artistsToUse.join(','));
             }
-
-            const artistsToUse = seed_artists.slice(0, totalSeeds - seedCount);
-             if(artistsToUse.length > 0){
-                queryParams.append('seed_artists', artistsToUse.join(','));
-                seedCount += artistsToUse.length;
-            }
-
-            const tracksToUse = seed_tracks.slice(0, totalSeeds - seedCount);
-            if(tracksToUse.length > 0){
+            if (tracksToUse.length > 0) {
                  queryParams.append('seed_tracks', tracksToUse.join(','));
             }
     
