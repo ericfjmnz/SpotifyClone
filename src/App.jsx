@@ -598,7 +598,7 @@ export default function App() {
         setCreatorStatus('Fetching all your playlists (0-15%)...');
 
         try {
-            const { uniqueTrackUris } = await fetchUniqueTrackUrisAndArtistIdsFromPlaylists(signal);
+            const { uniqueTrackUris } = await fetchUniqueTrackUisAndArtistIdsFromPlaylists(signal);
             const trackUrisArray = uniqueTrackUris; // Already an array from helper
 
             if (trackUrisArray.length === 0) {
