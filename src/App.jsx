@@ -235,60 +235,67 @@ export default function App() {
     const delay = (ms) => new Promise(res => setTimeout(res, ms));
 
 
-    // Helper to fetch all unique track URIs and artist IDs from user's playlists
-    const fetchUniqueTrackUrisAndArtistIdsFromPlaylists = useCallback(async (signal) => {
-        let allPlaylists = [];
-        let nextPlaylistsUrl = 'https://api.spotify.com/v1/me/playlists?limit=50'; 
+    // NEW: Custom hook for data fetching helpers
+    const useSpotifyDataHelpers = (token) => {
+        const fetchUniqueTrackUrisAndArtistIdsFromPlaylists = useCallback(async (signal) => {
+            let allPlaylists = [];
+            let nextPlaylistsUrl = 'https://api.spotify.com/v1/me/playlists?limit=50'; 
 
-        while (nextPlaylistsUrl) {
-            const response = await fetch(nextPlaylistsUrl, { 
-                headers: { Authorization: `Bearer ${token}` }, signal
-            });
-            if (!response.ok) {
-                throw new Error(`Failed to fetch playlists: ${response.status}`);
-            }
-            const data = await response.json();
-            allPlaylists = allPlaylists.concat(data.items);
-            nextPlaylistsUrl = data.next; 
-            await delay(50); // Add a small delay between playlist page fetches
-        }
-
-        if (allPlaylists.length === 0) {
-            throw new Error('You have no playlists in your Spotify library.');
-        }
-        
-        const uniqueTrackUris = new Set();
-        const uniqueArtistIds = new Set();
-        let processedPlaylistsCount = 0;
-
-        for (const playlist of allPlaylists) {
-            let nextTracksUrl = `https://api.spotify.com/v1/playlists/${playlist.id}/tracks?limit=100`;
-            while (nextTracksUrl) {
-                const response = await fetch(nextTracksUrl, { 
+            while (nextPlaylistsUrl) {
+                const response = await fetch(nextPlaylistsUrl, { 
                     headers: { Authorization: `Bearer ${token}` }, signal
                 });
                 if (!response.ok) {
-                    console.warn(`Failed to fetch tracks for playlist "${playlist.name}" (${playlist.id}): ${response.status}`);
-                    break; 
+                    throw new Error(`Failed to fetch playlists: ${response.status}`);
                 }
                 const data = await response.json();
-                if (data.items) { 
-                    data.items.forEach(item => {
-                        if (item.track && typeof item.track.uri === 'string' && item.track.uri.startsWith('spotify:track:')) {
-                            uniqueTrackUris.add(item.track.uri);
-                            item.track.artists.forEach(artist => uniqueArtistIds.add(artist.id));
-                        } else {
-                            console.warn(`Skipping invalid track URI from playlist "${playlist.name}":`, item.track);
-                        }
-                    });
-                }
-                nextTracksUrl = data.next; 
-                await delay(50); // Add a small delay between track page fetches for each playlist
+                allPlaylists = allPlaylists.concat(data.items);
+                nextPlaylistsUrl = data.next; 
+                await delay(50); // Add a small delay between playlist page fetches
             }
-            processedPlaylistsCount++;
-        }
-        return { uniqueTrackUris: Array.from(uniqueTrackUris), uniqueArtistIds: Array.from(uniqueArtistIds) };
-    }, [token]);
+
+            if (allPlaylists.length === 0) {
+                throw new Error('You have no playlists in your Spotify library.');
+            }
+            
+            const uniqueTrackUris = new Set();
+            const uniqueArtistIds = new Set();
+            let processedPlaylistsCount = 0;
+
+            for (const playlist of allPlaylists) {
+                let nextTracksUrl = `https://api.spotify.com/v1/playlists/${playlist.id}/tracks?limit=100`;
+                while (nextTracksUrl) {
+                    const response = await fetch(nextTracksUrl, { 
+                        headers: { Authorization: `Bearer ${token}` }, signal
+                    });
+                    if (!response.ok) {
+                        console.warn(`Failed to fetch tracks for playlist "${playlist.name}" (${playlist.id}): ${response.status}`);
+                        break; 
+                    }
+                    const data = await response.json();
+                    if (data.items) { 
+                        data.items.forEach(item => {
+                            if (item.track && typeof item.track.uri === 'string' && item.track.uri.startsWith('spotify:track:')) {
+                                uniqueTrackUris.add(item.track.uri);
+                                item.track.artists.forEach(artist => uniqueArtistIds.add(artist.id));
+                            } else {
+                                console.warn(`Skipping invalid track URI from playlist "${playlist.name}":`, item.track);
+                            }
+                        });
+                    }
+                    nextTracksUrl = data.next; 
+                    await delay(50); // Add a small delay between track page fetches for each playlist
+                }
+                processedPlaylistsCount++;
+            }
+            return { uniqueTrackUris: Array.from(uniqueTrackUris), uniqueArtistIds: Array.from(uniqueArtistIds) };
+        }, [token]); // Dependency on token ensures this helper updates if token changes
+
+        return { fetchUniqueTrackUrisAndArtistIdsFromPlaylists };
+    };
+
+    // Use the new hook at the top level of the App component
+    const { fetchUniqueTrackUrisAndArtistIdsFromPlaylists } = useSpotifyDataHelpers(token);
 
 
     const handleCreateWQXRPlaylist = useCallback(async () => {
@@ -684,7 +691,7 @@ export default function App() {
         setCreatorError('');
         setCreatedPlaylist(null);
         setGenreMixProgress(0);
-        setCreatorStatus('Collecting unique songs and artists from your playlists (Phase 1/3: 0-33%)...'); // Initial progress
+        setCreatorStatus('Collecting unique songs and artists from your playlists (Phase 1/2: 0-50%)...'); // Initial progress
 
         try {
             // Phase 1: Collect unique track URIs and artist IDs
@@ -694,8 +701,8 @@ export default function App() {
                 throw new Error('Could not find any unique songs across your playlists to determine genres.');
             }
 
-            setGenreMixProgress(33); 
-            setCreatorStatus(`Found ${uniqueArtistIds.length} unique artists. Fetching their genres (Phase 2/3: 33-66%)...`);
+            setGenreMixProgress(50); 
+            setCreatorStatus(`Found ${uniqueArtistIds.length} unique artists. Fetching their genres (Phase 2/2: 50-100%)...`);
 
             // Phase 2: Fetch genres for unique artists
             const uniqueGenres = new Set();
@@ -715,18 +722,17 @@ export default function App() {
                 artistsData.artists.forEach(artist => {
                     artist?.genres?.forEach(genre => uniqueGenres.add(genre));
                 });
-                setGenreMixProgress(33 + (i / totalArtists) * 33); // Progress for artist fetching (33-66%)
+                setGenreMixProgress(50 + (i / totalArtists) * 50); // Progress for artist fetching (50-100%)
                 await delay(50); // Delay for artist batch fetches
             }
 
-            setGenreMixProgress(66); 
-            setCreatorStatus(`All unique genres collected (Phase 3/3: 66-100%). Logging to console...`);
+            setGenreMixProgress(100); 
+            setCreatorStatus(`All unique genres collected (${uniqueGenres.size} genres). Logging to console...`);
             
             const uniqueGenresArray = Array.from(uniqueGenres);
             console.log("All unique genres from your playlists:", uniqueGenresArray);
 
-            setGenreMixProgress(100); 
-            setCreatorStatus(`Successfully collected and logged ${uniqueGenresArray.length} unique genres! Check console.`);
+            setCreatorStatus('Successfully collected and logged all genres! Check console.');
 
         } catch (e) {
             if (e.name === 'AbortError') {
