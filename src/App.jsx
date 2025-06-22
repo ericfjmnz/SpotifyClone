@@ -204,29 +204,17 @@ export default function App() {
     const [genreMixAbortController, setGenreMixAbortController] = useState(null); // New AbortController for genre mix
 
 
-    // Effect to manage status message visibility and auto-hide with fade
+    // Effect to manage status message visibility (NO AUTO-HIDE)
+    // The status message will only disappear when the "X" button is clicked.
     useEffect(() => {
-        if (creatorStatus) {
+        if (creatorStatus || creatorError) {
             setShowCreatorStatus(true);
-            // Trigger fade out after 1 minute - 2 seconds (for fade duration)
-            const fadeTimer = setTimeout(() => {
-                setFadeCreatorStatusOut(true);
-            }, 60000 - 2000); // 58 seconds
-
-            // Completely hide and clear after 1 minute
-            const hideTimer = setTimeout(() => {
-                setCreatorStatus('');
-                setCreatorError('');
-                setShowCreatorStatus(false);
-                setFadeCreatorStatusOut(false); // Reset fade state
-            }, 60000); // 60 seconds
-            
-            return () => {
-                clearTimeout(fadeTimer);
-                clearTimeout(hideTimer);
-            }; // Cleanup timers
+            setFadeCreatorStatusOut(false); // Ensure it's fully opaque when displayed
+        } else {
+            // Only hide immediately if there's no status and no error
+            setShowCreatorStatus(false);
         }
-    }, [creatorStatus]);
+    }, [creatorStatus, creatorError]);
 
 
     const getYesterdayDateParts = useCallback(() => {
@@ -696,18 +684,18 @@ export default function App() {
         setCreatorError('');
         setCreatedPlaylist(null);
         setGenreMixProgress(0);
-        setCreatorStatus('Collecting unique songs and artists from your playlists (Phase 1/5: 0-15%)...'); // Initial progress
+        setCreatorStatus('Collecting unique songs and artists from your playlists (Phase 1/3: 0-33%)...'); // Initial progress
 
         try {
             // Phase 1: Collect unique track URIs and artist IDs
-            const { uniqueTrackUris, uniqueArtistIds } = await fetchUniqueTrackUrisAndArtistIdsFromPlaylists(signal);
+            const { uniqueTrackUris, uniqueArtistIds } = await fetchUniqueTrackUisAndArtistIdsFromPlaylists(signal);
             
             if (uniqueTrackUris.length === 0) {
                 throw new Error('Could not find any unique songs across your playlists to determine genres.');
             }
 
-            setGenreMixProgress(15); 
-            setCreatorStatus(`Found ${uniqueArtistIds.length} unique artists. Fetching their genres (Phase 2/5: 15-60%)...`);
+            setGenreMixProgress(33); 
+            setCreatorStatus(`Found ${uniqueArtistIds.length} unique artists. Fetching their genres (Phase 2/3: 33-66%)...`);
 
             // Phase 2: Fetch genres for unique artists
             const uniqueGenres = new Set();
@@ -727,106 +715,32 @@ export default function App() {
                 artistsData.artists.forEach(artist => {
                     artist?.genres?.forEach(genre => uniqueGenres.add(genre));
                 });
-                setGenreMixProgress(15 + (i / totalArtists) * 45); // Progress for artist fetching (15-60%)
+                setGenreMixProgress(33 + (i / totalArtists) * 33); // Progress for artist fetching (33-66%)
                 await delay(50); // Delay for artist batch fetches
             }
 
-            setGenreMixProgress(60); 
-            setCreatorStatus(`Found ${uniqueGenres.size} unique genres. Fetching available genre seeds (Phase 3/5: 60-70%)...`);
+            setGenreMixProgress(66); 
+            setCreatorStatus(`All unique genres collected (Phase 3/3: 66-100%). Logging to console...`);
+            
+            const uniqueGenresArray = Array.from(uniqueGenres);
+            console.log("All unique genres from your playlists:", uniqueGenresArray);
 
-            // Phase 3: Fetch available genre seeds
-            const availableGenreSeedsResponse = await fetch(`https://api.spotify.com/v1/recommendations/available-genre-seeds`, {
-                headers: { Authorization: `Bearer ${token}` }, signal
-            });
-            if (!availableGenreSeedsResponse.ok) {
-                throw new Error(`Failed to fetch available genre seeds: ${availableGenreSeedsResponse.status}. This might be a temporary Spotify API issue.`);
-            }
-            const availableGenreSeedsData = await availableGenreSeedsResponse.json();
-            const validGenreSeeds = availableGenreSeedsData.genres;
-
-            setGenreMixProgress(70); 
-            setCreatorStatus('Filtering and selecting relevant genre seeds (Phase 4/5: 70-80%)...');
-
-            // Phase 4: Filter and select valid genre seeds from user's music
-            const relevantGenreSeeds = Array.from(uniqueGenres).filter(genre => validGenreSeeds.includes(genre));
-            // Spotify's recommendations endpoint limits seed types to 5
-            const selectedGenreSeeds = relevantGenreSeeds.slice(0, 5);
-
-            if (selectedGenreSeeds.length === 0) {
-                throw new Error('Could not find any relevant genres in your playlists that are also Spotify genre seeds. Try a different creator or add more diverse music.');
-            }
-
-            setGenreMixProgress(80); 
-            setCreatorStatus(`Generating recommendations based on your genres: ${selectedGenreSeeds.join(', ')} (Phase 5/5: 80-90%)...`);
-
-            // Phase 5: Get recommendations
-            const recommendationsResponse = await fetch(`https://api.spotify.com/v1/recommendations?limit=50&seed_genres=${selectedGenreSeeds.join(',')}`, {
-                headers: { Authorization: `Bearer ${token}` }, signal
-            });
-            if (!recommendationsResponse.ok) {
-                throw new Error(`Failed to fetch recommendations: ${recommendationsResponse.status}`);
-            }
-            const recommendationsData = await recommendationsResponse.json();
-            const recommendedTrackUris = recommendationsData.tracks.map(track => track.uri);
-
-            if (recommendedTrackUris.length === 0) {
-                throw new Error('Spotify could not generate recommendations based on your genres. Try again with different music or AI prompt.');
-            }
-
-            setGenreMixProgress(90); 
-            setCreatorStatus('Creating new genre mix playlist (90-100%)...');
-
-            // Phase 6: Create Playlist
-            const playlistName = `My Genre Mix - ${new Date().toLocaleDateString()}`;
-            const description = `A playlist generated from recommended tracks based on your top genres.`;
-            const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ name: playlistName, description: description, public: false }), signal
-            });
-            if (!playlistResponse.ok) {
-                const errorBody = await playlistResponse.json();
-                throw new Error(`Failed to create genre mix playlist: ${playlistResponse.status} - ${errorBody.error?.message || 'Unknown error'}`);
-            }
-            const newPlaylist = await playlistResponse.json();
-
-            setCreatorStatus(`Adding ${recommendedTrackUris.length} recommended songs to "${newPlaylist.name}" (90-100%)...`);
-            // Phase 7: Add Tracks
-            const chunkSizeForAdding = 100;
-            for (let i = 0; i < recommendedTrackUris.length; i += chunkSizeForAdding) {
-                const chunk = recommendedTrackUris.slice(i, i + chunkSizeForAdding);
-                const addTracksResponse = await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                    body: JSON.stringify({ uris: chunk }), signal
-                });
-
-                if (!addTracksResponse.ok) {
-                    const errorBody = await addTracksResponse.json();
-                    console.error(`Error adding tracks chunk to genre mix playlist ${newPlaylist.name}:`, errorBody);
-                    throw new Error(`Failed to add recommended tracks to playlist "${newPlaylist.name}": ${addTracksResponse.status} - ${errorBody.error?.message || 'Unknown error'}`);
-                }
-                setGenreMixProgress(90 + (i / recommendedTrackUris.length) * 10); // Progress from 90% to 100%
-                await delay(50); // Delay for adding tracks
-            }
-
-            setCreatedPlaylist(newPlaylist);
-            setCreatorStatus('Genre Mix playlist created successfully!');
-            setLibraryVersion(v => v + 1);
+            setGenreMixProgress(100); 
+            setCreatorStatus(`Successfully collected and logged ${uniqueGenresArray.length} unique genres! Check console.`);
 
         } catch (e) {
             if (e.name === 'AbortError') {
-                setCreatorStatus('Genre Mix playlist creation cancelled.');
+                setCreatorStatus('Genre Mix genre collection cancelled.');
             } else {
                 setCreatorError(e.message);
             }
-            console.error("Error creating genre mix playlist:", e);
+            console.error("Error collecting genres:", e);
         } finally {
             setIsGenreMixLoading(false);
             setGenreMixProgress(0);
             setGenreMixAbortController(null);
         }
-    }, [profile, token, setLibraryVersion, fetchUniqueTrackUrisAndArtistIdsFromPlaylists]);
+    }, [profile, token, fetchUniqueTrackUrisAndArtistIdsFromPlaylists]);
 
     const handleCancelGenreMixPlaylist = useCallback(() => {
         genreMixAbortController?.abort();
@@ -1395,7 +1309,7 @@ function HomePage() {
                             <img src={track.album.images[0]?.url || 'https://placehold.co/80x80/181818/FFFFFF?text=...'} alt={track.name} className="w-20 h-20 flex-shrink-0"/>
                             <p className="font-semibold text-white flex-1 pr-2">{track.name}</p>
                             <div className="mr-4 w-12 h-12 bg-green-500 rounded-full items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 shadow-xl hidden sm:flex">
-                             <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                             <svg className="w-6 h-6 text-black" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                             </div>
                        </div> 
                     ))}
@@ -1647,16 +1561,16 @@ function PlaylistCreator() {
 
             {/* NEW SECTION: AI-Powered Genre Mix Playlist Creator */}
             <div className="bg-gray-800 p-6 rounded-lg">
-                <h2 className="text-xl font-semibold mb-2">AI-Powered Genre Mix Playlist</h2>
+                <h2 className="text-xl font-semibold mb-2">AI-Powered Genre Mix Playlist - Genre Logger</h2>
                 <p className="text-gray-400 mb-4">
-                    Create a new playlist with recommendations based on the unique genres found in your Spotify playlists.
+                    Collects all unique genres from artists in your playlists and logs them to the console.
                 </p>
                 <button 
                     onClick={handleCreateGenreMixPlaylist} 
                     disabled={isAnyCurationLoading}
                     className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
                 >
-                    {isGenreMixLoading ? 'Creating...' : "Create Genre Mix Playlist"}
+                    {isGenreMixLoading ? 'Collecting Genres...' : "Collect & Log Genres"}
                 </button>
                 {isGenreMixLoading && (
                     <button 
