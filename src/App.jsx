@@ -199,10 +199,12 @@ export default function App() {
     const [allSongsProgress, setAllSongsProgress] = useState(0);
     const [allSongsAbortController, setAllSongsAbortController] = useState(null); // New AbortController state
 
-    const [isGenreMixLoading, setIsGenreMixLoading] = useState(false); // New state for genre mix loading
-    const [genreMixProgress, setGenreMixProgress] = useState(0); // New state for genre mix progress
-    const [genreMixAbortController, setGenreMixAbortController] = useState(null); // New AbortController for genre mix
-
+    const [isGenreFusionLoading, setIsGenreFusionLoading] = useState(false);
+    const [genreFusionProgress, setGenreFusionProgress] = useState(0);
+    const [genreFusionAbortController, setGenreFusionAbortController] = useState(null);
+    const [availableGenres, setAvailableGenres] = useState([]);
+    const [selectedGenres, setSelectedGenres] = useState([]);
+    const [genreFusionName, setGenreFusionName] = useState("");
 
     // Effect to manage status message visibility (NO AUTO-HIDE)
     // The status message will only disappear when the "X" button is clicked.
@@ -407,8 +409,8 @@ export default function App() {
         setIsCustomLoading(true);
     
         const totalSongsToRequest = 200;
-        const songsPerBatch = 50; // Ask for 50 songs per batch for higher reliability
-        const numberOfBatches = Math.ceil(totalSongsToRequest / songsPerBatch); // This will be 4
+        const songsPerBatch = 50; 
+        const numberOfBatches = Math.ceil(totalSongsToRequest / songsPerBatch); 
         let allTrackUris = new Set();
     
         try {
@@ -717,82 +719,126 @@ export default function App() {
         allSongsAbortController?.abort();
     }, [allSongsAbortController]);
 
-    const handleCreateGenreMixPlaylist = useCallback(async () => {
+    const handleFetchAvailableGenres = useCallback(async () => {
         if (!profile) {
-            setCreatorError('Could not get user user profile. Please try again.');
+            setCreatorError('Could not get user profile. Please try again.');
             return;
         }
         const controller = new AbortController();
-        setGenreMixAbortController(controller);
+        setGenreFusionAbortController(controller);
         const signal = controller.signal;
 
-        setIsGenreMixLoading(true);
+        setIsGenreFusionLoading(true);
         setCreatorError('');
-        setCreatedPlaylist(null);
-        setGenreMixProgress(0);
-        setCreatorStatus('Collecting unique songs and artists from your playlists (Phase 1/2: 0-50%)...'); // Initial progress
+        setAvailableGenres([]);
+        setGenreFusionProgress(0);
+        setCreatorStatus('Scanning your library for genres...');
 
         try {
-            // Phase 1: Collect unique track URIs and artist IDs
-            // Using the helper function here
-            const { uniqueTrackUris, uniqueArtistIds } = await fetchUniqueTrackUisAndArtistIdsFromPlaylists(signal);
-            
-            if (uniqueTrackUris.length === 0) {
-                throw new Error('Could not find any unique songs across your playlists to determine genres.');
+            const { uniqueArtistIds } = await fetchUniqueTrackUisAndArtistIdsFromPlaylists(signal);
+            if (uniqueArtistIds.length === 0) {
+                throw new Error('Could not find any artists in your playlists to determine genres.');
             }
-
-            setGenreMixProgress(50);
-            setCreatorStatus(`Found ${uniqueArtistIds.length} unique artists. Fetching their genres (Phase 2/2: 50-100%)...`);
-
-            // Phase 2: Fetch genres for unique artists
-            const uniqueGenres = new Set();
-            const artistBatchSize = 50; // Max artist IDs per request
-            const totalArtists = uniqueArtistIds.length;
-            for (let i = 0; i < totalArtists; i += artistBatchSize) {
-                const batch = uniqueArtistIds.slice(i, i + artistBatchSize);
-                const artistsResponse = await fetch(`https://api.spotify.com/v1/artists?ids=${batch.join(',')}`, {
+            setCreatorStatus(`Found ${uniqueArtistIds.length} unique artists. Fetching their genres...`);
+            
+            const genres = new Set();
+            const batchSize = 50;
+            for (let i = 0; i < uniqueArtistIds.length; i += batchSize) {
+                const batch = uniqueArtistIds.slice(i, i + batchSize);
+                const response = await fetch(`https://api.spotify.com/v1/artists?ids=${batch.join(',')}`, {
                     headers: { Authorization: `Bearer ${token}` }, signal
                 });
-                if (!artistsResponse.ok) {
-                    console.warn(`Failed to fetch artists batch: ${artistsResponse.status}`);
-                    // Don't throw fatal error, just skip this batch
+                if (!response.ok) {
+                    console.warn(`Failed to fetch artist batch: ${response.status}`);
                     continue;
                 }
-                const artistsData = await artistsResponse.json();
-                artistsData.artists.forEach(artist => {
-                    artist?.genres?.forEach(genre => uniqueGenres.add(genre));
+                const data = await response.json();
+                data.artists.forEach(artist => {
+                    artist?.genres?.forEach(genre => genres.add(genre));
                 });
-                setGenreMixProgress(50 + (i / totalArtists) * 50); // Progress for artist fetching (50-100%)
-                await delay(50); // Delay for artist batch fetches
+                setGenreFusionProgress((i / uniqueArtistIds.length) * 100);
+                await delay(50);
             }
-
-            setGenreMixProgress(100);
-            setCreatorStatus(`All unique genres collected (${uniqueGenres.size} genres). Logging to console...`);
             
-            const uniqueGenresArray = Array.from(uniqueGenres);
-            console.log("All unique genres from your playlists:", uniqueGenresArray);
-
-            setCreatorStatus('Successfully collected and logged all genres! Check console.');
+            const sortedGenres = Array.from(genres).sort();
+            setAvailableGenres(sortedGenres);
+            setCreatorStatus(`Found ${sortedGenres.length} unique genres. Select two or more to create a fusion playlist.`);
 
         } catch (e) {
             if (e.name === 'AbortError') {
-                setCreatorStatus('Genre Mix genre collection cancelled.');
+                setCreatorStatus('Genre scan cancelled.');
             } else {
                 setCreatorError(e.message);
             }
-            console.error("Error collecting genres:", e);
+            console.error("Error fetching genres:", e);
         } finally {
-            setIsGenreMixLoading(false);
-            setGenreMixProgress(0);
-            setGenreMixAbortController(null);
+            setIsGenreFusionLoading(false);
+            setGenreFusionProgress(0);
         }
     }, [profile, token, fetchUniqueTrackUisAndArtistIdsFromPlaylists]);
 
-    const handleCancelGenreMixPlaylist = useCallback(() => {
-        genreMixAbortController?.abort();
-    }, [genreMixAbortController]);
+    const handleCreateGenreFusionPlaylist = useCallback(async () => {
+        if (selectedGenres.length < 2) {
+            setCreatorError("Please select at least two genres to fuse.");
+            return;
+        }
+        if (!genreFusionName.trim()) {
+            setCreatorError("Please enter a name for your fusion playlist.");
+            return;
+        }
 
+        setIsGenreFusionLoading(true);
+        setCreatorError('');
+        setCreatorStatus('Finding tracks for your genre fusion...');
+        
+        try {
+            const seed_genres = selectedGenres.slice(0, 5).join(','); // Spotify allows up to 5 seed values
+            const response = await fetch(`https://api.spotify.com/v1/recommendations?limit=50&seed_genres=${seed_genres}`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
 
+            if (!response.ok) {
+                throw new Error(`Failed to get recommendations: ${response.status}`);
+            }
+
+            const data = await response.json();
+            const trackUris = data.tracks.map(track => track.uri);
+
+            if (trackUris.length === 0) {
+                throw new Error("Couldn't find any tracks for that genre combination. Try a different fusion!");
+            }
+            
+            setCreatorStatus(`Creating playlist "${genreFusionName}"...`);
+            const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({
+                    name: genreFusionName,
+                    description: `A fusion of ${selectedGenres.join(', ')}. Created by your app.`,
+                    public: false
+                })
+            });
+            const newPlaylist = await playlistResponse.json();
+
+            await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ uris: trackUris })
+            });
+
+            setCreatedPlaylist(newPlaylist);
+            setCreatorStatus("Genre Fusion playlist created successfully!");
+            setLibraryVersion(v => v + 1);
+            setSelectedGenres([]);
+            setGenreFusionName("");
+
+        } catch (e) {
+            setCreatorError(e.message);
+            console.error("Error creating genre fusion playlist:", e);
+        } finally {
+            setIsGenreFusionLoading(false);
+        }
+    }, [profile, token, selectedGenres, genreFusionName, setLibraryVersion]);
 
     const logout = useCallback(() => {
         setToken(null);
@@ -934,7 +980,7 @@ export default function App() {
             isCustomLoading, customPlaylistName, setCustomPlaylistName, aiPrompt, setAiPrompt, handleCreateAiPlaylist, handleCancelAiPlaylist, resetCustomForm,
             isTopTracksLoading, topTracksProgress, handleCreateTopTracksPlaylist, handleCancelTopTracksPlaylist,
             isAllSongsLoading, allSongsProgress, handleCreateAllSongsPlaylist, handleCancelAllSongsPlaylist,
-            isGenreMixLoading, genreMixProgress, handleCreateGenreMixPlaylist, handleCancelGenreMixPlaylist,
+            isGenreFusionLoading, genreFusionProgress, handleFetchAvailableGenres, handleCreateGenreFusionPlaylist, availableGenres, selectedGenres, setSelectedGenres, genreFusionName, setGenreFusionName,
             getYesterdayDateParts // Pass getYesterdayDateParts to context
         }}>
             <div className="h-screen w-full flex flex-col bg-black text-white font-sans">
@@ -1478,24 +1524,29 @@ function PlaylistView({ playlistId }) {
 
 function PlaylistCreator() {
     const {
-        creatorStatus, creatorError, createdPlaylist,
+        creatorStatus, creatorError,
         isWqxrLoading, wqxrProgress, handleCreateWQXRPlaylist, handleCancelWQXRPlaylist,
         isCustomLoading, customPlaylistName, setCustomPlaylistName, aiPrompt, setAiPrompt, handleCreateAiPlaylist, handleCancelAiPlaylist,
         isTopTracksLoading, topTracksProgress, handleCreateTopTracksPlaylist, handleCancelTopTracksPlaylist,
         isAllSongsLoading, allSongsProgress, handleCreateAllSongsPlaylist, handleCancelAllSongsPlaylist,
-        isGenreMixLoading, genreMixProgress, handleCreateGenreMixPlaylist, handleCancelGenreMixPlaylist,
+        isGenreFusionLoading, genreFusionProgress, handleFetchAvailableGenres, handleCreateGenreFusionPlaylist, availableGenres, selectedGenres, setSelectedGenres, genreFusionName, setGenreFusionName,
         getYesterdayDateParts,
         showCreatorStatus, setShowCreatorStatus, fadeCreatorStatusOut
     } = useContext(AppContext);
 
-    const isAnyCurationLoading = isWqxrLoading || isCustomLoading || isTopTracksLoading || isAllSongsLoading || isGenreMixLoading;
+    const isAnyCurationLoading = isWqxrLoading || isCustomLoading || isTopTracksLoading || isAllSongsLoading || isGenreFusionLoading;
     const { year: yesterdayYear, month: yesterdayMonth, day: yesterdayDay } = getYesterdayDateParts();
+
+    const handleGenreSelect = (genre) => {
+        setSelectedGenres(prev => 
+            prev.includes(genre) ? prev.filter(g => g !== genre) : [...prev, genre]
+        );
+    };
 
     return (
         <div>
             <h1 className="text-3xl font-bold mb-4">Playlist Creator</h1>
             
-            {/* Sticky Status Bar */}
             <div className="sticky top-0 z-10 bg-gray-800/95 backdrop-blur-sm py-3 mb-4">
                 {showCreatorStatus && (creatorError || creatorStatus) && (
                     <div className={`p-3 rounded-md flex items-center justify-between transition-opacity duration-2000 ${creatorError ? 'bg-red-800' : 'bg-blue-800'} ${fadeCreatorStatusOut ? 'opacity-0' : 'opacity-100'}`}>
@@ -1514,6 +1565,64 @@ function PlaylistCreator() {
             </div>
 
             <div className="space-y-8">
+                <div className="bg-gray-800 p-6 rounded-lg">
+                    <h2 className="text-xl font-semibold mb-2">Genre Fusion Creator</h2>
+                    <p className="text-gray-400 mb-4">
+                        Discover new music by blending genres from your library. Start by scanning for your available genres.
+                    </p>
+                    <button
+                        onClick={handleFetchAvailableGenres}
+                        disabled={isAnyCurationLoading}
+                        className="bg-teal-600 hover:bg-teal-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
+                    >
+                        {isGenreFusionLoading ? 'Scanning...' : "Scan My Library for Genres"}
+                    </button>
+                    
+                    {isGenreFusionLoading && (
+                        <div className="mt-4">
+                            <div className="w-full bg-gray-600 rounded-full h-2.5">
+                                <div className="bg-teal-500 h-2.5 rounded-full" style={{ width: `${genreFusionProgress}%` }}></div>
+                            </div>
+                            <p className="text-center text-sm text-gray-300 mt-1">{Math.round(genreFusionProgress)}%</p>
+                        </div>
+                    )}
+
+                    {availableGenres.length > 0 && !isGenreFusionLoading && (
+                        <div className="mt-6">
+                            <h3 className="text-lg font-semibold mb-2">Your Available Genres:</h3>
+                            <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto p-2 bg-gray-900 rounded-md">
+                                {availableGenres.map(genre => (
+                                    <button
+                                        key={genre}
+                                        onClick={() => handleGenreSelect(genre)}
+                                        className={`px-3 py-1 text-sm rounded-full transition-colors ${selectedGenres.includes(genre) ? 'bg-green-500 text-black' : 'bg-gray-700 hover:bg-gray-600'}`}
+                                    >
+                                        {genre}
+                                    </button>
+                                ))}
+                            </div>
+
+                            {selectedGenres.length > 0 && (
+                                <div className="mt-4">
+                                     <h3 className="text-lg font-semibold mb-2">Selected Genres for Fusion:</h3>
+                                     <p className="text-gray-400 italic mb-4">{selectedGenres.join(', ')}</p>
+                                     <div>
+                                        <label className="block mb-1 text-sm font-medium text-gray-300">Playlist Name</label>
+                                        <input type="text" value={genreFusionName} onChange={e => setGenreFusionName(e.target.value)} placeholder="My Genre Fusion" className="w-full p-2 bg-gray-700 rounded-md border-gray-600" />
+                                     </div>
+                                     <button
+                                        onClick={handleCreateGenreFusionPlaylist}
+                                        disabled={isAnyCurationLoading || selectedGenres.length < 2}
+                                        className="mt-4 bg-green-600 hover:bg-green-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
+                                    >
+                                        Create Genre Fusion Playlist
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+
                 <div className="bg-gray-800 p-6 rounded-lg">
                     <h2 className="text-xl font-semibold mb-2">WQXR Daily Playlist</h2>
                     <p className="text-gray-400 mb-4">
@@ -1600,36 +1709,6 @@ function PlaylistCreator() {
                                 <div className="bg-orange-500 h-2.5 rounded-full" style={{ width: `${allSongsProgress}%` }}></div>
                             </div>
                             <p className="text-center text-sm text-gray-300 mt-1">{Math.round(allSongsProgress)}%</p>
-                        </div>
-                    )}
-                </div>
-
-                <div className="bg-gray-800 p-6 rounded-lg">
-                    <h2 className="text-xl font-semibold mb-2">AI-Powered Genre Mix Playlist - Genre Logger</h2>
-                    <p className="text-gray-400 mb-4">
-                        Collects all unique genres from artists in your playlists and logs them to the console.
-                    </p>
-                    <button
-                        onClick={handleCreateGenreMixPlaylist}
-                        disabled={isAnyCurationLoading}
-                        className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
-                    >
-                        {isGenreMixLoading ? 'Collecting Genres...' : "Collect & Log Genres"}
-                    </button>
-                    {isGenreMixLoading && (
-                        <button
-                            onClick={handleCancelGenreMixPlaylist}
-                            className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
-                        >
-                            Cancel
-                        </button>
-                    )}
-                    {isGenreMixLoading && (
-                        <div className="mt-4">
-                            <div className="w-full bg-gray-600 rounded-full h-2.5">
-                                <div className="bg-blue-500 h-2.5 rounded-full" style={{ width: `${genreMixProgress}%` }}></div>
-                            </div>
-                            <p className="text-center text-sm text-gray-300 mt-1">{Math.round(genreMixProgress)}%</p>
                         </div>
                     )}
                 </div>
