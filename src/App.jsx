@@ -41,8 +41,9 @@ function generateCodeVerifier(length) {
 
 async function generateCodeChallenge(codeVerifier) {
     const data = new TextEncoder().encode(codeVerifier);
+    // Corrected from Uint9Array to Uint8Array
     const digest = await window.crypto.subtle.digest('SHA-256', data);
-    return btoa(String.fromCharCode.apply(null, [...new Uint9Array(digest)]))
+    return btoa(String.fromCharCode.apply(null, [...new Uint8Array(digest)])) 
         .replace(/\+/g, '-')
         .replace(/\//g, '_')
         .replace(/=+$/, '');
@@ -1158,7 +1159,7 @@ function PlaylistCreator() {
                 const newPlaylist = await playlistResponse.json();
                 createdPlaylistsInfo.push(newPlaylist);
 
-                setStatus(`Adding ${currentChunkOfTracks.length} songs to "${playlistName}"...`);
+                setStatus(`Adding ${currentChunkOfTracks.length} songs to "${newPlaylist.name}"...`);
                 const chunkSizeForAdding = 100;
                 for (let i = 0; i < currentChunkOfTracks.length; i += chunkSizeForAdding) {
                     const chunk = currentChunkOfTracks.slice(i, i + chunkSizeForAdding);
