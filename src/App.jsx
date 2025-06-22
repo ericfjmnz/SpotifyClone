@@ -684,7 +684,7 @@ export default function App() {
         setCreatorError('');
         setCreatedPlaylist(null);
         setGenreMixProgress(0);
-        setCreatorStatus('Collecting unique songs and artists from your playlists...');
+        setCreatorStatus('Collecting unique songs and artists from your playlists (15%)...'); // Initial progress
 
         try {
             // Phase 1: Collect unique track URIs and artist IDs
@@ -694,8 +694,8 @@ export default function App() {
                 throw new Error('Could not find any unique songs across your playlists to determine genres.');
             }
 
-            setGenreMixProgress(10); // Indicate completion of first phase
-            setCreatorStatus(`Found ${uniqueArtistIds.length} unique artists. Fetching their genres...`);
+            setGenreMixProgress(15); 
+            setCreatorStatus(`Found ${uniqueArtistIds.length} unique artists. Fetching their genres (15-60%)...`);
 
             // Phase 2: Fetch genres for unique artists
             const uniqueGenres = new Set();
@@ -707,17 +707,18 @@ export default function App() {
                 });
                 if (!artistsResponse.ok) {
                     console.warn(`Failed to fetch artists batch: ${artistsResponse.status}`);
-                    continue;
+                    // Don't throw fatal error, just skip this batch
+                    continue; 
                 }
                 const artistsData = await artistsResponse.json();
                 artistsData.artists.forEach(artist => {
                     artist?.genres?.forEach(genre => uniqueGenres.add(genre));
                 });
-                setGenreMixProgress(10 + (i / uniqueArtistIds.length) * 40); // Progress for artist fetching (10-50%)
+                setGenreMixProgress(15 + (i / uniqueArtistIds.length) * 45); // Progress for artist fetching (15-60%)
             }
 
-            setGenreMixProgress(50); // Indicate completion of artist genre fetching
-            setCreatorStatus(`Found ${uniqueGenres.size} unique genres. Fetching available genre seeds...`);
+            setGenreMixProgress(60); 
+            setCreatorStatus(`Found ${uniqueGenres.size} unique genres. Fetching available genre seeds (60-70%)...`);
 
             // Phase 3: Fetch available genre seeds
             const availableGenreSeedsResponse = await fetch(`https://api.spotify.com/v1/recommendations/available-genre-seeds`, {
@@ -729,8 +730,8 @@ export default function App() {
             const availableGenreSeedsData = await availableGenreSeedsResponse.json();
             const validGenreSeeds = availableGenreSeedsData.genres;
 
-            setGenreMixProgress(60); // Indicate completion of fetching available seeds
-            setCreatorStatus('Filtering and selecting relevant genre seeds...');
+            setGenreMixProgress(70); 
+            setCreatorStatus('Filtering and selecting relevant genre seeds (70-80%)...');
 
             // Phase 4: Filter and select valid genre seeds from user's music
             const relevantGenreSeeds = Array.from(uniqueGenres).filter(genre => validGenreSeeds.includes(genre));
@@ -741,8 +742,8 @@ export default function App() {
                 throw new Error('Could not find any relevant genres in your playlists that are also Spotify genre seeds. Try a different creator or add more diverse music.');
             }
 
-            setGenreMixProgress(70); // Indicate completion of genre selection
-            setCreatorStatus(`Generating recommendations based on your genres: ${selectedGenreSeeds.join(', ')}...`);
+            setGenreMixProgress(80); 
+            setCreatorStatus(`Generating recommendations based on your genres: ${selectedGenreSeeds.join(', ')} (80-90%)...`);
 
             // Phase 5: Get recommendations
             const recommendationsResponse = await fetch(`https://api.spotify.com/v1/recommendations?limit=50&seed_genres=${selectedGenreSeeds.join(',')}`, {
@@ -758,8 +759,8 @@ export default function App() {
                 throw new Error('Spotify could not generate recommendations based on your genres. Try again with different music or AI prompt.');
             }
 
-            setGenreMixProgress(80); // Indicate completion of recommendations fetching
-            setCreatorStatus('Creating new genre mix playlist...');
+            setGenreMixProgress(90); 
+            setCreatorStatus('Creating new genre mix playlist (90-100%)...');
 
             // Phase 6: Create Playlist
             const playlistName = `My Genre Mix - ${new Date().toLocaleDateString()}`;
@@ -775,7 +776,7 @@ export default function App() {
             }
             const newPlaylist = await playlistResponse.json();
 
-            setCreatorStatus(`Adding ${recommendedTrackUris.length} recommended songs to "${newPlaylist.name}"...`);
+            setCreatorStatus(`Adding ${recommendedTrackUris.length} recommended songs to "${newPlaylist.name}" (90-100%)...`);
             // Phase 7: Add Tracks
             const chunkSizeForAdding = 100;
             for (let i = 0; i < recommendedTrackUris.length; i += chunkSizeForAdding) {
@@ -791,7 +792,7 @@ export default function App() {
                     console.error(`Error adding tracks chunk to genre mix playlist ${newPlaylist.name}:`, errorBody);
                     throw new Error(`Failed to add recommended tracks to playlist "${newPlaylist.name}": ${addTracksResponse.status} - ${errorBody.error?.message || 'Unknown error'}`);
                 }
-                setGenreMixProgress(80 + (i / recommendedTrackUris.length) * 20); // Progress from 80% to 100%
+                setGenreMixProgress(90 + (i / recommendedTrackUris.length) * 10); // Progress from 90% to 100%
             }
 
             setCreatedPlaylist(newPlaylist);
