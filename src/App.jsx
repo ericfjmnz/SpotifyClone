@@ -176,6 +176,8 @@ export default function App() {
     const [creatorStatus, setCreatorStatus] = useState('');
     const [creatorError, setCreatorError] = useState('');
     const [createdPlaylist, setCreatedPlaylist] = useState(null); // Can be used to show link to newly created playlist
+    const [showCreatorStatus, setShowCreatorStatus] = useState(false); // New state to control status visibility
+
 
     const [isWqxrLoading, setIsWqxrLoading] = useState(false);
     const [wqxrProgress, setWqxrProgress] = useState(0);
@@ -195,6 +197,19 @@ export default function App() {
     const [isAllSongsLoading, setIsAllSongsLoading] = useState(false);
     const [allSongsProgress, setAllSongsProgress] = useState(0);
     const [allSongsAbortController, setAllSongsAbortController] = useState(null); // New AbortController state
+
+    // Effect to manage status message visibility and auto-hide
+    useEffect(() => {
+        if (creatorStatus) {
+            setShowCreatorStatus(true);
+            const timer = setTimeout(() => {
+                setCreatorStatus('');
+                setCreatorError('');
+                setShowCreatorStatus(false);
+            }, 60000); // Hide after 1 minute
+            return () => clearTimeout(timer); // Cleanup timer
+        }
+    }, [creatorStatus]);
 
 
     const getYesterdayDateParts = useCallback(() => {
@@ -241,8 +256,7 @@ export default function App() {
             
             const trackUris = [];
             for (const [index, track] of wqxrTracks.entries()) {
-                const query = encodeURIComponent(`track:${track.title} artist:${track.composer}`);
-                const response = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, {
+                const response = await fetch(`https://api.spotify.com/v1/search?q=${encodeURIComponent(`track:${track.title} artist:${track.composer}`)}&type=track&limit=1`, {
                     headers: { Authorization: `Bearer ${token}` }, signal 
                 });
                 const searchData = await response.json();
@@ -372,7 +386,6 @@ export default function App() {
             }
 
             setCreatorStatus('Searching for suggested songs on Spotify...');
-            const trackUris = [];
             await Promise.all(aiSuggestions.map(async (song) => {
                 const query = encodeURIComponent(`track:${song.track} artist:${song.artist}`);
                 const searchResponse = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, {
@@ -773,7 +786,7 @@ export default function App() {
     return (
         <AppContext.Provider value={{ token, view, setView, selectedPlaylistId, setSelectedPlaylistId, player, isPlayerReady, currentTrack, isPaused, logout, deviceId, position, libraryVersion, setLibraryVersion, profile, setProfile, setPlaylistToEdit, setPlaylistToDelete,
             // Playlist Creator states and functions passed via context
-            creatorStatus, creatorError, createdPlaylist,
+            creatorStatus, creatorError, createdPlaylist, showCreatorStatus, setShowCreatorStatus,
             isWqxrLoading, wqxrProgress, handleCreateWQXRPlaylist, handleCancelWQXRPlaylist,
             isCustomLoading, customPlaylistName, setCustomPlaylistName, aiPrompt, setAiPrompt, handleCreateAiPlaylist, handleCancelAiPlaylist, resetCustomForm,
             isTopTracksLoading, topTracksProgress, handleCreateTopTracksPlaylist, handleCancelTopTracksPlaylist,
@@ -1254,7 +1267,8 @@ function PlaylistCreator() {
         isCustomLoading, customPlaylistName, setCustomPlaylistName, aiPrompt, setAiPrompt, handleCreateAiPlaylist, handleCancelAiPlaylist, resetCustomForm,
         isTopTracksLoading, topTracksProgress, handleCreateTopTracksPlaylist, handleCancelTopTracksPlaylist,
         isAllSongsLoading, allSongsProgress, handleCreateAllSongsPlaylist, handleCancelAllSongsPlaylist,
-        getYesterdayDateParts // Destructure getYesterdayDateParts from context
+        getYesterdayDateParts, // Destructure getYesterdayDateParts from context
+        showCreatorStatus, setShowCreatorStatus // Access new state and setter
     } = useContext(AppContext);
 
     // Determine if any curation is currently running to disable buttons
@@ -1267,11 +1281,22 @@ function PlaylistCreator() {
         <div className="space-y-8">
             <h1 className="text-3xl font-bold mb-4">Playlist Creator</h1>
             
-            {creatorError && <div className="p-3 bg-red-800 text-white rounded-md mb-4">{creatorError}</div>}
-            {creatorStatus && !creatorError && <div className="p-3 bg-blue-800 text-white rounded-md mb-4">{creatorStatus}</div>}
+            {/* Display status or error message */}
+            {showCreatorStatus && (creatorError || creatorStatus) && (
+                <div className={`p-3 rounded-md mb-4 flex items-center justify-between ${creatorError ? 'bg-red-800' : 'bg-blue-800'}`}>
+                    <p className="flex-1">{creatorError || creatorStatus}</p>
+                    <button 
+                        onClick={() => setShowCreatorStatus(false)} 
+                        className="ml-4 text-white hover:text-gray-300 focus:outline-none"
+                        aria-label="Close status"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                        </svg>
+                    </button>
+                </div>
+            )}
             
-            {/* Removed the conditional rendering for createdPlaylist link here */}
-
              <div className="bg-gray-800 p-6 rounded-lg">
                 <h2 className="text-xl font-semibold mb-2">WQXR Daily Playlist</h2>
                 <p className="text-gray-400 mb-4">
