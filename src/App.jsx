@@ -118,19 +118,6 @@ function LoginScreen() {
                 <h1 className="text-4xl font-bold mb-2">Connect to Spotify</h1>
                 <p className="text-gray-400 mb-6">Please send your Spotify email to efjmnz@hotmail.com and I will send you the Client ID.</p>
                 
-                {/* <div className="bg-gray-900 p-4 rounded-lg mb-6 text-left">
-                    <label className="text-sm font-semibold text-gray-300">Your Redirect URI:</label>
-                    <div className="flex items-center justify-between mt-2">
-                        <code className="text-green-400 bg-black p-2 rounded-md text-sm break-all">{REDIRECT_URI}</code>
-                        <button onClick={copyToClipboard} className={`ml-4 px-4 py-2 text-sm font-semibold rounded-md transition-colors ${copied ? 'bg-green-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
-                            {copied ? 'Copied!' : 'Copy'}
-                        </button>
-                    </div>
-                    <p className="text-xs text-gray-500 mt-3">Copy this exact URI and paste it into the "Redirect URIs" field in your Spotify app's settings.</p>
-                </div> */}
-                
-                {/* <p className="text-gray-400 mb-4">Once configured, enter your Client ID below to log in.</p> */}
-
                 <form onSubmit={handleLogin} className="flex flex-col gap-4">
                     <input
                         type="text"
@@ -741,14 +728,26 @@ export default function App() {
         setCreatorError('');
         setAvailableGenres([]);
         setGenreFusionProgress(0);
-        setCreatorStatus('Scanning your library for genres...');
+        setCreatorStatus('Scanning your top tracks for genres...');
 
         try {
-            const { uniqueArtistIds } = await fetchUniqueTrackUisAndArtistIdsFromPlaylists(signal);
+            const topTracksResponse = await spotifyFetch(`/me/top/tracks?limit=50&time_range=long_term`, { signal });
+            if(!topTracksResponse.ok) throw new Error("Failed to fetch top tracks");
+            const topTracksData = await topTracksResponse.json();
+
+            const topTracksResponse2 = await spotifyFetch(`/me/top/tracks?limit=50&offset=50&time_range=long_term`, { signal });
+            if(!topTracksResponse2.ok) throw new Error("Failed to fetch top tracks");
+            const topTracksData2 = await topTracksResponse2.json();
+
+            const topTracks = [...topTracksData.items, ...topTracksData2.items];
+            const artistIds = new Set(topTracks.flatMap(track => track.artists.map(artist => artist.id)));
+            
+            const uniqueArtistIds = Array.from(artistIds);
+
             if (uniqueArtistIds.length === 0) {
-                throw new Error('Could not find any artists in your playlists to determine genres.');
+                throw new Error('Could not find any artists in your top 100 tracks to determine genres.');
             }
-            setCreatorStatus(`Found ${uniqueArtistIds.length} unique artists. Fetching their genres...`);
+            setCreatorStatus(`Found ${uniqueArtistIds.length} unique artists in your top 100. Fetching their genres...`);
             
             const genres = new Set();
             const batchSize = 50;
@@ -763,7 +762,7 @@ export default function App() {
                 data.artists.forEach(artist => {
                     artist?.genres?.forEach(genre => genres.add(genre));
                 });
-                setGenreFusionProgress((i / uniqueArtistIds.length) * 100);
+                setGenreFusionProgress(((i + batch.length) / uniqueArtistIds.length) * 100);
                 await delay(50);
             }
             
@@ -782,7 +781,7 @@ export default function App() {
             setIsGenreFusionLoading(false);
             setGenreFusionProgress(0);
         }
-    }, [profile, token, fetchUniqueTrackUisAndArtistIdsFromPlaylists, spotifyFetch]);
+    }, [profile, spotifyFetch]);
 
     const handleCreateGenreFusionPlaylist = useCallback(async () => {
         if (selectedGenres.length < 1 || selectedGenres.length > 3) {
@@ -800,59 +799,71 @@ export default function App() {
     
         setIsGenreFusionLoading(true);
         setCreatorError('');
-        setCreatorStatus('Finding seed artists and tracks from your library...');
+        setCreatorStatus('Creating your genre fusion playlist with AI...');
     
         try {
-            // Fetch top artists and tracks to use as seeds
-            const topArtistsResponse = await spotifyFetch(`/me/top/artists?limit=2&time_range=short_term`, { signal });
-            const topTracksResponse = await spotifyFetch(`/me/top/tracks?limit=3&time_range=short_term`, { signal });
-    
-            if (!topArtistsResponse.ok || !topTracksResponse.ok) {
-                throw new Error('Could not fetch seed data from your library.');
+            const prompt = `Generate a playlist of 50 songs that blend the following genres: ${selectedGenres.join(', ')}. Include a mix of well-known and lesser-known artists that fit this fusion.`;
+            
+            let chatHistory = [{ role: "user", parts: [{ text: prompt }] }];
+            const payload = {
+                contents: chatHistory,
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: "OBJECT",
+                        properties: {
+                            "songs": {
+                                type: "ARRAY",
+                                items: {
+                                    type: "OBJECT",
+                                    properties: { "track": { "type": "STRING" }, "artist": { "type": "STRING" } },
+                                    required: ["track", "artist"]
+                                }
+                            }
+                        },
+                        required: ["songs"]
+                    }
+                }
+            };
+            
+            const apiKey = "AIzaSyAsb7lrYNWBzSIUe5RUCOCMib20FzAX61M"; 
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+            const geminiResponse = await fetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+                signal
+            });
+
+            if (!geminiResponse.ok) throw new Error(`AI request failed: ${geminiResponse.statusText}`);
+            
+            const result = await geminiResponse.json();
+            if (!result.candidates?.[0]?.content?.parts?.[0]?.text) {
+                throw new Error("AI response was empty or invalid. Please try a different fusion.");
             }
     
-            const topArtistsData = await topArtistsResponse.json();
-            const topTracksData = await topTracksResponse.json();
+            const songsText = result.candidates[0].content.parts[0].text;
+            const aiSuggestions = JSON.parse(songsText).songs;
     
-            const seed_artists = topArtistsData.items.map(artist => artist.id);
-            const seed_tracks = topTracksData.items.map(track => track.id);
-    
-            // Construct a query with a mix of seeds to ensure validity
-            let queryParams = new URLSearchParams({ limit: 50 });
-            
-            // Spotify allows up to 5 total seeds. We'll use a mix.
-            const totalSeeds = 5;
-            let seedCount = 0;
-            
-            const genresToUse = selectedGenres.slice(0, totalSeeds);
-            if(genresToUse.length > 0){
-                queryParams.append('seed_genres', genresToUse.join(','));
-                seedCount += genresToUse.length;
+            if (!aiSuggestions || aiSuggestions.length === 0) {
+                throw new Error("The AI could not suggest any songs for this fusion.");
             }
 
-            const artistsToUse = seed_artists.slice(0, totalSeeds - seedCount);
-             if(artistsToUse.length > 0){
-                queryParams.append('seed_artists', artistsToUse.join(','));
-                seedCount += artistsToUse.length;
+            setCreatorStatus('Finding AI-suggested songs on Spotify...');
+            const trackUris = new Set();
+            for (const song of aiSuggestions) {
+                const query = encodeURIComponent(`track:${song.track} artist:${song.artist}`);
+                const searchResponse = await spotifyFetch(`/search?q=${query}&type=track&limit=1`, { signal });
+                const searchData = await searchResponse.json();
+                if (searchData.tracks.items.length > 0) {
+                    trackUris.add(searchData.tracks.items[0].uri);
+                }
+                await delay(50);
             }
 
-            const tracksToUse = seed_tracks.slice(0, totalSeeds - seedCount);
-            if(tracksToUse.length > 0){
-                 queryParams.append('seed_tracks', tracksToUse.join(','));
-            }
-    
-            setCreatorStatus('Getting recommendations from Spotify...');
-            const recommendationsResponse = await spotifyFetch(`/recommendations?${queryParams.toString()}`, { signal });
-    
-            if (!recommendationsResponse.ok) {
-                 throw new Error(`Failed to get recommendations: ${recommendationsResponse.status}`);
-            }
-    
-            const recommendationsData = await recommendationsResponse.json();
-            const trackUris = recommendationsData.tracks.map(track => track.uri);
-    
-            if (trackUris.length === 0) {
-                throw new Error("Couldn't find any tracks for that genre combination. Try a different fusion!");
+            const finalTrackUris = Array.from(trackUris);
+            if(finalTrackUris.length === 0) {
+                throw new Error("Could not find any of the AI's suggestions on Spotify.");
             }
             
             setCreatorStatus(`Creating playlist "${genreFusionName}"...`);
@@ -860,7 +871,7 @@ export default function App() {
                 method: 'POST',
                 body: JSON.stringify({
                     name: genreFusionName,
-                    description: `A fusion of ${selectedGenres.join(', ')}. Created by your app.`,
+                    description: `An AI-powered fusion of ${selectedGenres.join(', ')}.`,
                     public: false
                 }),
                 signal
@@ -869,7 +880,7 @@ export default function App() {
     
             await spotifyFetch(`/playlists/${newPlaylist.id}/tracks`, {
                 method: 'POST',
-                body: JSON.stringify({ uris: trackUris }),
+                body: JSON.stringify({ uris: finalTrackUris }),
                 signal
             });
     
@@ -890,7 +901,7 @@ export default function App() {
             setIsGenreFusionLoading(false);
             setGenreFusionAbortController(null);
         }
-    }, [profile, token, selectedGenres, genreFusionName, setLibraryVersion, spotifyFetch]);
+    }, [profile, spotifyFetch, selectedGenres, genreFusionName, setLibraryVersion]);
 
     const handleCancelGenreFusion = useCallback(() => {
         genreFusionAbortController?.abort();
@@ -1577,14 +1588,14 @@ function PlaylistCreator() {
                 <div className="bg-gray-800 p-6 rounded-lg">
                     <h2 className="text-xl font-semibold mb-2">Genre Fusion Creator</h2>
                     <p className="text-gray-400 mb-4">
-                        Select 1 to 3 genres from your library to create a unique fusion playlist.
+                        Discover new music by blending genres from your top 100 tracks. Start by scanning for your available genres.
                     </p>
                     <button
                         onClick={handleFetchAvailableGenres}
                         disabled={isAnyCurationLoading}
                         className="bg-teal-600 hover:bg-teal-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
                     >
-                        {isGenreFusionLoading ? 'Scanning...' : "Scan My Library for Genres"}
+                        {isGenreFusionLoading ? 'Scanning...' : "Scan My Top 100 Genres"}
                     </button>
                     
                     {isGenreFusionLoading && (
