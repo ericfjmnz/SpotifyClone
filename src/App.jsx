@@ -269,17 +269,17 @@ export default function App() {
         // fetchUniqueTrackUisAndArtistIdsFromPlaylists is now directly defined here
         const fetchUniqueTrackUisAndArtistIdsFromPlaylists = useCallback(async (signal) => {
             let allPlaylists = [];
-            let nextPlaylistsUrl = 'https://api.spotify.com/v1/me/playlists?limit=50';
+            let nextPlaylistsUrl = '/me/playlists?limit=50';
 
             while (nextPlaylistsUrl) {
-                const response = await spotifyFetch(nextPlaylistsUrl.replace('https://api.spotify.com/v1', ''), { signal });
+                const response = await spotifyFetch(nextPlaylistsUrl, { signal });
 
                 if (!response.ok) {
                     throw new Error(`Failed to fetch playlists: ${response.status}`);
                 }
                 const data = await response.json();
                 allPlaylists = allPlaylists.concat(data.items);
-                nextPlaylistsUrl = data.next;
+                nextPlaylistsUrl = data.next ? data.next.replace('https://api.spotify.com/v1', '') : null;
                 await delay(50); // Add a small delay between playlist page fetches
             }
 
@@ -292,9 +292,9 @@ export default function App() {
             let processedPlaylistsCount = 0;
 
             for (const playlist of allPlaylists) {
-                let nextTracksUrl = playlist.tracks.href;
+                let nextTracksUrl = playlist.tracks.href.replace('https://api.spotify.com/v1', '');
                 while (nextTracksUrl) {
-                    const response = await spotifyFetch(nextTracksUrl.replace('https://api.spotify.com/v1', ''), { signal });
+                    const response = await spotifyFetch(nextTracksUrl, { signal });
                     
                     if (!response.ok) {
                         console.warn(`Failed to fetch tracks for playlist "${playlist.name}" (${playlist.id}): ${response.status}`);
@@ -311,7 +311,7 @@ export default function App() {
                             }
                         });
                     }
-                    nextTracksUrl = data.next;
+                    nextTracksUrl = data.next ? data.next.replace('https://api.spotify.com/v1', '') : null;
                     await delay(50); // Add a small delay between track page fetches for each playlist
                 }
                 processedPlaylistsCount++;
@@ -804,8 +804,8 @@ export default function App() {
     
         try {
             // Fetch top artists and tracks to use as seeds
-            const topArtistsResponse = await spotifyFetch(`/me/top/artists?limit=5&time_range=short_term`, { signal });
-            const topTracksResponse = await spotifyFetch(`/me/top/tracks?limit=5&time_range=short_term`, { signal });
+            const topArtistsResponse = await spotifyFetch(`/me/top/artists?limit=2&time_range=short_term`, { signal });
+            const topTracksResponse = await spotifyFetch(`/me/top/tracks?limit=3&time_range=short_term`, { signal });
     
             if (!topArtistsResponse.ok || !topTracksResponse.ok) {
                 throw new Error('Could not fetch seed data from your library.');
