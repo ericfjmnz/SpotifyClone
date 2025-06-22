@@ -206,7 +206,7 @@ export default function App() {
                 setCreatorStatus('');
                 setCreatorError('');
                 setShowCreatorStatus(false);
-            }, 60000); // Hide after 1 minute
+            }, 2000); // Hide after 2 seconds
             return () => clearTimeout(timer); // Cleanup timer
         }
     }, [creatorStatus]);
