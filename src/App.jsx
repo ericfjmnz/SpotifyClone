@@ -179,16 +179,23 @@ export default function App() {
 
     const [isWqxrLoading, setIsWqxrLoading] = useState(false);
     const [wqxrProgress, setWqxrProgress] = useState(0);
+    const [wqxrAbortController, setWqxrAbortController] = useState(null); // New AbortController state
 
     const [isCustomLoading, setIsCustomLoading] = useState(false);
     const [customPlaylistName, setCustomPlaylistName] = useState('');
     const [aiPrompt, setAiPrompt] = useState("");
+    const [customAbortController, setCustomAbortController] = useState(null); // New AbortController state
+
 
     const [isTopTracksLoading, setIsTopTracksLoading] = useState(false);
     const [topTracksProgress, setTopTracksProgress] = useState(0); 
+    const [topTracksAbortController, setTopTracksAbortController] = useState(null); // New AbortController state
+
 
     const [isAllSongsLoading, setIsAllSongsLoading] = useState(false);
     const [allSongsProgress, setAllSongsProgress] = useState(0);
+    const [allSongsAbortController, setAllSongsAbortController] = useState(null); // New AbortController state
+
 
     const getYesterdayDateParts = useCallback(() => {
         const yesterday = new Date();
@@ -209,6 +216,10 @@ export default function App() {
             setCreatorError('Could not get user profile. Please try again.');
             return;
         }
+        const controller = new AbortController(); // Create new AbortController
+        setWqxrAbortController(controller); // Store it in state
+        const signal = controller.signal;
+
         setIsWqxrLoading(true);
         setCreatorError('');
         setCreatedPlaylist(null);
@@ -216,8 +227,8 @@ export default function App() {
         setCreatorStatus('Requesting playlist from proxy server...');
 
         try {
-            const { year, month, day } = getYesterdayDateParts(); // Destructure here
-            const proxyResponse = await fetch(`http://localhost:3001/wqxr-playlist?year=${year}&month=${month}&day=${day}`);
+            const { year, month, day } = getYesterdayDateParts(); 
+            const proxyResponse = await fetch(`http://localhost:3001/wqxr-playlist?year=${year}&month=${month}&day=${day}`, { signal }); // Pass signal
             
             if (!proxyResponse.ok) throw new Error('Failed to fetch data from proxy server. Make sure it is running.');
     
@@ -232,7 +243,7 @@ export default function App() {
             for (const [index, track] of wqxrTracks.entries()) {
                 const query = encodeURIComponent(`track:${track.title} artist:${track.composer}`);
                 const response = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, {
-                    headers: { Authorization: `Bearer ${token}` }
+                    headers: { Authorization: `Bearer ${token}` }, signal 
                 });
                 const searchData = await response.json();
                 if (searchData.tracks.items.length > 0) {
@@ -249,7 +260,7 @@ export default function App() {
             const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`},
-                body: JSON.stringify({ name: playlistName, description: `A playlist of songs from WQXR on ${year}-${month}-${day}.`, public: false }) 
+                body: JSON.stringify({ name: playlistName, description: `A playlist of songs from WQXR on ${year}-${month}-${day}.`, public: false }), signal
             });
             const newPlaylist = await playlistResponse.json();
     
@@ -257,7 +268,7 @@ export default function App() {
             await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ uris: trackUris })
+                body: JSON.stringify({ uris: trackUris }), signal
             });
             
             setCreatedPlaylist(newPlaylist);
@@ -265,14 +276,22 @@ export default function App() {
             setLibraryVersion(v => v + 1);
         
         } catch (e) {
-            setCreatorError(e.message);
-            setCreatorStatus('');
+            if (e.name === 'AbortError') {
+                setCreatorStatus('WQXR playlist creation cancelled.');
+            } else {
+                setCreatorError(e.message);
+            }
             console.error(e);
         } finally {
             setIsWqxrLoading(false);
             setWqxrProgress(0); 
+            setWqxrAbortController(null); // Clear controller reference
         }
     }, [profile, token, getYesterdayDateParts, setLibraryVersion]);
+
+    const handleCancelWQXRPlaylist = useCallback(() => {
+        wqxrAbortController?.abort(); // Abort the ongoing fetch
+    }, [wqxrAbortController]);
 
 
     const handleCreateAiPlaylist = useCallback(async () => {
@@ -291,6 +310,10 @@ export default function App() {
             setCreatorError('Could not get user profile. Please try again.');
             return;
         }
+
+        const controller = new AbortController();
+        setCustomAbortController(controller);
+        const signal = controller.signal;
 
         setIsCustomLoading(true);
         setCreatorStatus('Asking AI for song ideas... This may take a moment.');
@@ -327,7 +350,7 @@ export default function App() {
             const geminiResponse = await fetch(apiUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                body: JSON.stringify(payload), signal
             });
             
             if(!geminiResponse.ok) {
@@ -353,7 +376,7 @@ export default function App() {
             await Promise.all(aiSuggestions.map(async (song) => {
                 const query = encodeURIComponent(`track:${song.track} artist:${song.artist}`);
                 const searchResponse = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, {
-                    headers: { Authorization: `Bearer ${token}` }
+                    headers: { Authorization: `Bearer ${token}` }, signal
                 });
                 const searchData = await searchResponse.json();
                 if (searchData.tracks.items.length > 0) {
@@ -369,7 +392,7 @@ export default function App() {
             const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ name: customPlaylistName, description: `AI-generated playlist based on the prompt: "${aiPrompt}"`, public: false })
+                body: JSON.stringify({ name: customPlaylistName, description: `AI-generated playlist based on the prompt: "${aiPrompt}"`, public: false }), signal
             });
             const newPlaylist = await playlistResponse.json();
 
@@ -377,7 +400,7 @@ export default function App() {
             await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ uris: trackUris })
+                body: JSON.stringify({ uris: trackUris }), signal
             });
 
             setCreatedPlaylist(newPlaylist);
@@ -386,19 +409,32 @@ export default function App() {
             resetCustomForm();
 
         } catch (e) {
-            setCreatorError(`An error occurred: ${e.message}`);
+            if (e.name === 'AbortError') {
+                setCreatorStatus('AI playlist creation cancelled.');
+            } else {
+                setCreatorError(`An error occurred: ${e.message}`);
+            }
             console.error(e);
-            setCreatorStatus('');
         } finally {
             setIsCustomLoading(false);
+            setCustomAbortController(null); // Clear controller reference
         }
     }, [profile, token, customPlaylistName, aiPrompt, setLibraryVersion, resetCustomForm]);
+
+    const handleCancelAiPlaylist = useCallback(() => {
+        customAbortController?.abort();
+    }, [customAbortController]);
+
 
     const handleCreateTopTracksPlaylist = useCallback(async () => {
         if (!profile) {
             setCreatorError('Could not get user profile. Please try again.');
             return;
         }
+        const controller = new AbortController();
+        setTopTracksAbortController(controller);
+        const signal = controller.signal;
+
         setIsTopTracksLoading(true);
         setCreatorError('');
         setCreatedPlaylist(null);
@@ -407,7 +443,7 @@ export default function App() {
 
         try {
             const response = await fetch(`https://api.spotify.com/v1/me/top/tracks?limit=50`, {
-                headers: { Authorization: `Bearer ${token}` }
+                headers: { Authorization: `Bearer ${token}` }, signal
             });
             if (!response.ok) {
                 throw new Error(`Failed to fetch top tracks: ${response.status}`);
@@ -426,7 +462,7 @@ export default function App() {
             const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ name: playlistName, description: 'A playlist generated from your top Spotify tracks.', public: false })
+                body: JSON.stringify({ name: playlistName, description: 'A playlist generated from your top Spotify tracks.', public: false }), signal
             });
             const newPlaylist = await playlistResponse.json();
 
@@ -434,27 +470,40 @@ export default function App() {
             await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ uris: trackUris })
+                body: JSON.stringify({ uris: trackUris }), signal
             });
 
             setCreatedPlaylist(newPlaylist);
             setCreatorStatus('Top tracks playlist created successfully!');
             setLibraryVersion(v => v + 1);
         } catch (e) {
-            setCreatorError(e.message);
-            setCreatorStatus('');
+            if (e.name === 'AbortError') {
+                setCreatorStatus('Top tracks playlist creation cancelled.');
+            } else {
+                setCreatorError(e.message);
+            }
             console.error(e);
         } finally {
             setIsTopTracksLoading(false);
             setTopTracksProgress(0);
+            setTopTracksAbortController(null); // Clear controller reference
         }
     }, [profile, token, setLibraryVersion]);
+
+    const handleCancelTopTracksPlaylist = useCallback(() => {
+        topTracksAbortController?.abort();
+    }, [topTracksAbortController]);
+
 
     const handleCreateAllSongsPlaylist = useCallback(async () => {
         if (!profile) {
             setCreatorError('Could not get user profile. Please try again.');
             return;
         }
+        const controller = new AbortController();
+        setAllSongsAbortController(controller);
+        const signal = controller.signal;
+
         setIsAllSongsLoading(true);
         setCreatorError('');
         setCreatedPlaylist(null);
@@ -467,7 +516,7 @@ export default function App() {
 
             while (nextPlaylistsUrl) {
                 const response = await fetch(nextPlaylistsUrl, { 
-                    headers: { Authorization: `Bearer ${token}` }
+                    headers: { Authorization: `Bearer ${token}` }, signal
                 });
                 if (!response.ok) {
                     throw new Error(`Failed to fetch playlists: ${response.status}`);
@@ -490,7 +539,7 @@ export default function App() {
                 let nextTracksUrl = `https://api.spotify.com/v1/playlists/${playlist.id}/tracks?limit=100`;
                 while (nextTracksUrl) {
                     const response = await fetch(nextTracksUrl, { 
-                        headers: { Authorization: `Bearer ${token}` }
+                        headers: { Authorization: `Bearer ${token}` }, signal
                     });
                     if (!response.ok) {
                         console.warn(`Failed to fetch tracks for playlist "${playlist.name}" (${playlist.id}): ${response.status}`);
@@ -536,7 +585,7 @@ export default function App() {
                 const playlistResponse = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                    body: JSON.stringify({ name: playlistName, description: description, public: false })
+                    body: JSON.stringify({ name: playlistName, description: description, public: false }), signal
                 });
 
                 if (!playlistResponse.ok) {
@@ -553,7 +602,7 @@ export default function App() {
                     const addTracksResponse = await fetch(`https://api.spotify.com/v1/playlists/${newPlaylist.id}/tracks`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                        body: JSON.stringify({ uris: chunk })
+                        body: JSON.stringify({ uris: chunk }), signal
                     });
 
                     if (!addTracksResponse.ok) {
@@ -571,15 +620,22 @@ export default function App() {
             setLibraryVersion(v => v + 1); 
 
         } catch (e) {
-            setCreatorError(e.message);
-            setCreatorStatus('');
+            if (e.name === 'AbortError') {
+                setCreatorStatus('All songs playlist creation cancelled.');
+            } else {
+                setCreatorError(e.message);
+            }
             console.error("Error creating all songs from playlists:", e);
         } finally {
             setIsAllSongsLoading(false);
             setAllSongsProgress(0);
+            setAllSongsAbortController(null); // Clear controller reference
         }
     }, [profile, token, setLibraryVersion]);
 
+    const handleCancelAllSongsPlaylist = useCallback(() => {
+        allSongsAbortController?.abort();
+    }, [allSongsAbortController]);
 
 
     const logout = useCallback(() => {
@@ -718,10 +774,10 @@ export default function App() {
         <AppContext.Provider value={{ token, view, setView, selectedPlaylistId, setSelectedPlaylistId, player, isPlayerReady, currentTrack, isPaused, logout, deviceId, position, libraryVersion, setLibraryVersion, profile, setProfile, setPlaylistToEdit, setPlaylistToDelete,
             // Playlist Creator states and functions passed via context
             creatorStatus, creatorError, createdPlaylist,
-            isWqxrLoading, wqxrProgress, handleCreateWQXRPlaylist,
-            isCustomLoading, customPlaylistName, setCustomPlaylistName, aiPrompt, setAiPrompt, handleCreateAiPlaylist, resetCustomForm,
-            isTopTracksLoading, topTracksProgress, handleCreateTopTracksPlaylist,
-            isAllSongsLoading, allSongsProgress, handleCreateAllSongsPlaylist,
+            isWqxrLoading, wqxrProgress, handleCreateWQXRPlaylist, handleCancelWQXRPlaylist,
+            isCustomLoading, customPlaylistName, setCustomPlaylistName, aiPrompt, setAiPrompt, handleCreateAiPlaylist, handleCancelAiPlaylist, resetCustomForm,
+            isTopTracksLoading, topTracksProgress, handleCreateTopTracksPlaylist, handleCancelTopTracksPlaylist,
+            isAllSongsLoading, allSongsProgress, handleCreateAllSongsPlaylist, handleCancelAllSongsPlaylist,
             getYesterdayDateParts // Pass getYesterdayDateParts to context
         }}>
             <div className="h-screen w-full flex flex-col bg-black text-white font-sans">
@@ -1193,11 +1249,11 @@ function PlaylistView({ playlistId }) {
 function PlaylistCreator() {
     const { 
         token, setLibraryVersion, profile,
-        creatorStatus, creatorError, createdPlaylist,
-        isWqxrLoading, wqxrProgress, handleCreateWQXRPlaylist,
-        isCustomLoading, customPlaylistName, setCustomPlaylistName, aiPrompt, setAiPrompt, handleCreateAiPlaylist, resetCustomForm,
-        isTopTracksLoading, topTracksProgress, handleCreateTopTracksPlaylist,
-        isAllSongsLoading, allSongsProgress, handleCreateAllSongsPlaylist,
+        creatorStatus, creatorError, createdPlaylist, // createdPlaylist is still here but not rendered directly
+        isWqxrLoading, wqxrProgress, handleCreateWQXRPlaylist, handleCancelWQXRPlaylist,
+        isCustomLoading, customPlaylistName, setCustomPlaylistName, aiPrompt, setAiPrompt, handleCreateAiPlaylist, handleCancelAiPlaylist, resetCustomForm,
+        isTopTracksLoading, topTracksProgress, handleCreateTopTracksPlaylist, handleCancelTopTracksPlaylist,
+        isAllSongsLoading, allSongsProgress, handleCreateAllSongsPlaylist, handleCancelAllSongsPlaylist,
         getYesterdayDateParts // Destructure getYesterdayDateParts from context
     } = useContext(AppContext);
 
@@ -1214,14 +1270,7 @@ function PlaylistCreator() {
             {creatorError && <div className="p-3 bg-red-800 text-white rounded-md mb-4">{creatorError}</div>}
             {creatorStatus && !creatorError && <div className="p-3 bg-blue-800 text-white rounded-md mb-4">{creatorStatus}</div>}
             
-            {/* Display link to the created playlist if available and no error */}
-            {createdPlaylist && !creatorError && (
-                <div className="p-3 bg-green-800 text-white rounded-md mb-4">
-                    Playlist created: <a href={createdPlaylist.external_urls.spotify} target="_blank" rel="noopener noreferrer" className="underline hover:no-underline">
-                        {createdPlaylist.name}
-                    </a>
-                </div>
-            )}
+            {/* Removed the conditional rendering for createdPlaylist link here */}
 
              <div className="bg-gray-800 p-6 rounded-lg">
                 <h2 className="text-xl font-semibold mb-2">WQXR Daily Playlist</h2>
@@ -1235,6 +1284,14 @@ function PlaylistCreator() {
                 >
                     {isWqxrLoading ? 'Creating...' : "Create Yesterday's Playlist"}
                 </button>
+                {isWqxrLoading && (
+                    <button 
+                        onClick={handleCancelWQXRPlaylist} 
+                        className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
+                    >
+                        Cancel
+                    </button>
+                )}
                 {isWqxrLoading && (
                     <div className="mt-4">
                         <div className="w-full bg-gray-600 rounded-full h-2.5">
@@ -1259,6 +1316,14 @@ function PlaylistCreator() {
                     {isTopTracksLoading ? 'Creating...' : "Create Top Tracks Playlist"}
                 </button>
                 {isTopTracksLoading && (
+                    <button 
+                        onClick={handleCancelTopTracksPlaylist} 
+                        className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
+                    >
+                        Cancel
+                    </button>
+                )}
+                {isTopTracksLoading && (
                     <div className="mt-4">
                         <div className="w-full bg-gray-600 rounded-full h-2.5">
                             <div className="bg-purple-500 h-2.5 rounded-full" style={{ width: `${topTracksProgress}%` }}></div>
@@ -1281,6 +1346,14 @@ function PlaylistCreator() {
                 >
                     {isAllSongsLoading ? 'Creating...' : "Create All My Playlists Songs"}
                 </button>
+                {isAllSongsLoading && (
+                    <button 
+                        onClick={handleCancelAllSongsPlaylist} 
+                        className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
+                    >
+                        Cancel
+                    </button>
+                )}
                 {isAllSongsLoading && (
                     <div className="mt-4">
                         <div className="w-full bg-gray-600 rounded-full h-2.5">
@@ -1313,6 +1386,14 @@ function PlaylistCreator() {
                 >
                     {isCustomLoading ? 'Creating...' : "Create AI Playlist"}
                 </button>
+                {isCustomLoading && (
+                    <button 
+                        onClick={handleCancelAiPlaylist} 
+                        className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
+                    >
+                        Cancel
+                    </button>
+                )}
             </div>
         </div>
     );
