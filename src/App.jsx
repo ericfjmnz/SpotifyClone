@@ -970,6 +970,7 @@ function Sidebar() {
             </div>
             <div className="bg-[#121212] rounded-lg p-2 mt-2 flex-1 overflow-y-auto">
                 <h2 className="p-4 text-base font-semibold text-gray-300">Your Library</h2>
+                <p className="px-4 text-xs text-gray-500 mb-2">Note: Playlists will only display up to 100 songs.</p>
                 {playlistsLoading ? (
                     <p className="p-4 text-gray-400">Loading playlists...</p>
                 ) : (
@@ -1406,6 +1407,7 @@ function PlaylistView({ playlistId }) {
                     <p className="text-sm font-bold">Playlist</p>
                     <h1 className="text-5xl font-extrabold">{playlist.name}</h1>
                     <p className="text-gray-300 mt-2" dangerouslySetInnerHTML={{ __html: playlist.description }} />
+                    {playlist.tracks.total > 100 && <p className="text-xs text-gray-400 mt-2">Note: Displaying the first 100 songs from this playlist.</p>}
                 </div>
             </header>
             
@@ -1413,7 +1415,7 @@ function PlaylistView({ playlistId }) {
             
             <div>
                 {playlist.tracks?.items?.length > 0 ? (
-                    playlist.tracks.items.map(({ track }, index) => {
+                    playlist.tracks.items.slice(0, 100).map(({ track }, index) => {
                         if(!track) return null; // Tracks can sometimes be null if they are unavailable.
                         const isPlaying = currentTrack?.uri === track.uri && !isPaused;
 
@@ -1457,196 +1459,193 @@ function PlaylistView({ playlistId }) {
 
 function PlaylistCreator() {
     const {
-        token, setLibraryVersion, profile,
-        creatorStatus, creatorError, createdPlaylist, // createdPlaylist is still here but not rendered directly
+        creatorStatus, creatorError, createdPlaylist,
         isWqxrLoading, wqxrProgress, handleCreateWQXRPlaylist, handleCancelWQXRPlaylist,
-        isCustomLoading, customPlaylistName, setCustomPlaylistName, aiPrompt, setAiPrompt, handleCreateAiPlaylist, handleCancelAiPlaylist, resetCustomForm,
+        isCustomLoading, customPlaylistName, setCustomPlaylistName, aiPrompt, setAiPrompt, handleCreateAiPlaylist, handleCancelAiPlaylist,
         isTopTracksLoading, topTracksProgress, handleCreateTopTracksPlaylist, handleCancelTopTracksPlaylist,
         isAllSongsLoading, allSongsProgress, handleCreateAllSongsPlaylist, handleCancelAllSongsPlaylist,
-        isGenreMixLoading, genreMixProgress, handleCreateGenreMixPlaylist, handleCancelGenreMixPlaylist, // New genre mix states
-        getYesterdayDateParts, // Destructure getYesterdayDateParts from context
-        showCreatorStatus, setShowCreatorStatus, fadeCreatorStatusOut // Access new state and setter
+        isGenreMixLoading, genreMixProgress, handleCreateGenreMixPlaylist, handleCancelGenreMixPlaylist,
+        getYesterdayDateParts,
+        showCreatorStatus, setShowCreatorStatus, fadeCreatorStatusOut
     } = useContext(AppContext);
 
-    // Determine if any curation is currently running to disable buttons
     const isAnyCurationLoading = isWqxrLoading || isCustomLoading || isTopTracksLoading || isAllSongsLoading || isGenreMixLoading;
-
-    // Call getYesterdayDateParts here to get the values for rendering
     const { year: yesterdayYear, month: yesterdayMonth, day: yesterdayDay } = getYesterdayDateParts();
 
     return (
-        <div className="space-y-8">
+        <div>
             <h1 className="text-3xl font-bold mb-4">Playlist Creator</h1>
             
-            {/* Display status or error message */}
-            {showCreatorStatus && (creatorError || creatorStatus) && (
-                <div className={`p-3 rounded-md mb-4 flex items-center justify-between transition-opacity duration-2000 ${creatorError ? 'bg-red-800' : 'bg-blue-800'} ${fadeCreatorStatusOut ? 'opacity-0' : 'opacity-100'}`}>
-                    <p className="flex-1">{creatorError || creatorStatus}</p>
+            {/* Sticky Status Bar */}
+            <div className="sticky top-0 z-10 bg-gray-800/95 backdrop-blur-sm py-3 mb-4">
+                {showCreatorStatus && (creatorError || creatorStatus) && (
+                    <div className={`p-3 rounded-md flex items-center justify-between transition-opacity duration-2000 ${creatorError ? 'bg-red-800' : 'bg-blue-800'} ${fadeCreatorStatusOut ? 'opacity-0' : 'opacity-100'}`}>
+                        <p className="flex-1">{creatorError || creatorStatus}</p>
+                        <button 
+                            onClick={() => setShowCreatorStatus(false)} 
+                            className="ml-4 text-white hover:text-gray-300 focus:outline-none"
+                            aria-label="Close status"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                            </svg>
+                        </button>
+                    </div>
+                )}
+            </div>
+
+            <div className="space-y-8">
+                <div className="bg-gray-800 p-6 rounded-lg">
+                    <h2 className="text-xl font-semibold mb-2">WQXR Daily Playlist</h2>
+                    <p className="text-gray-400 mb-4">
+                        Create a new playlist based on the music played yesterday ({yesterdayDay}-{yesterdayMonth}-{yesterdayYear}) on WQXR.
+                    </p>
                     <button
-                        onClick={() => setShowCreatorStatus(false)}
-                        className="ml-4 text-white hover:text-gray-300 focus:outline-none"
-                        aria-label="Close status"
+                        onClick={handleCreateWQXRPlaylist}
+                        disabled={isAnyCurationLoading}
+                        className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
                     >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                            <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                        </svg>
+                        {isWqxrLoading ? 'Creating...' : "Create Yesterday's Playlist"}
                     </button>
+                    {isWqxrLoading && (
+                        <button
+                            onClick={handleCancelWQXRPlaylist}
+                            className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
+                        >
+                            Cancel
+                        </button>
+                    )}
+                    {isWqxrLoading && (
+                        <div className="mt-4">
+                            <div className="w-full bg-gray-600 rounded-full h-2.5">
+                                <div className="bg-blue-500 h-2.5 rounded-full" style={{ width: `${wqxrProgress}%` }}></div>
+                            </div>
+                            <p className="text-center text-sm text-gray-300 mt-1">{Math.round(wqxrProgress)}%</p>
+                        </div>
+                    )}
                 </div>
-            )}
-            
-             <div className="bg-gray-800 p-6 rounded-lg">
-                <h2 className="text-xl font-semibold mb-2">WQXR Daily Playlist</h2>
-                <p className="text-gray-400 mb-4">
-                    Create a new playlist based on the music played yesterday ({yesterdayDay}-{yesterdayMonth}-{yesterdayYear}) on WQXR.
-                </p>
-                <button
-                    onClick={handleCreateWQXRPlaylist}
-                    disabled={isAnyCurationLoading}
-                    className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
-                >
-                    {isWqxrLoading ? 'Creating...' : "Create Yesterday's Playlist"}
-                </button>
-                {isWqxrLoading && (
-                    <button
-                        onClick={handleCancelWQXRPlaylist}
-                        className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
-                    >
-                        Cancel
-                    </button>
-                )}
-                {isWqxrLoading && (
-                    <div className="mt-4">
-                        <div className="w-full bg-gray-600 rounded-full h-2.5">
-                            <div className="bg-blue-500 h-2.5 rounded-full" style={{ width: `${wqxrProgress}%` }}></div>
-                        </div>
-                        <p className="text-center text-sm text-gray-300 mt-1">{Math.round(wqxrProgress)}%</p>
-                    </div>
-                )}
-            </div>
 
-            {/* New section for Top Tracks Playlist */}
-            <div className="bg-gray-800 p-6 rounded-lg">
-                <h2 className="text-xl font-semibold mb-2">Playlist from Your Top Tracks</h2>
-                <p className="text-gray-400 mb-4">
-                    Instantly create a new playlist composed of your 100 most listened to tracks on Spotify.
-                </p>
-                <button
-                    onClick={handleCreateTopTracksPlaylist}
-                    disabled={isAnyCurationLoading}
-                    className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
-                >
-                    {isTopTracksLoading ? 'Creating...' : "Create Top Tracks Playlist"}
-                </button>
-                {isTopTracksLoading && (
+                <div className="bg-gray-800 p-6 rounded-lg">
+                    <h2 className="text-xl font-semibold mb-2">Playlist from Your Top Tracks</h2>
+                    <p className="text-gray-400 mb-4">
+                        Instantly create a new playlist composed of your 100 most listened to tracks on Spotify.
+                    </p>
                     <button
-                        onClick={handleCancelTopTracksPlaylist}
-                        className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
+                        onClick={handleCreateTopTracksPlaylist}
+                        disabled={isAnyCurationLoading}
+                        className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
                     >
-                        Cancel
+                        {isTopTracksLoading ? 'Creating...' : "Create Top Tracks Playlist"}
                     </button>
-                )}
-                {isTopTracksLoading && (
-                    <div className="mt-4">
-                        <div className="w-full bg-gray-600 rounded-full h-2.5">
-                            <div className="bg-purple-500 h-2.5 rounded-full" style={{ width: `${topTracksProgress}%` }}></div>
+                    {isTopTracksLoading && (
+                        <button
+                            onClick={handleCancelTopTracksPlaylist}
+                            className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
+                        >
+                            Cancel
+                        </button>
+                    )}
+                    {isTopTracksLoading && (
+                        <div className="mt-4">
+                            <div className="w-full bg-gray-600 rounded-full h-2.5">
+                                <div className="bg-purple-500 h-2.5 rounded-full" style={{ width: `${topTracksProgress}%` }}></div>
+                            </div>
+                            <p className="text-center text-sm text-gray-300 mt-1">{Math.round(topTracksProgress)}%</p>
                         </div>
-                        <p className="text-center text-sm text-gray-300 mt-1">{Math.round(topTracksProgress)}%</p>
-                    </div>
-                )}
-            </div>
-
-            {/* New section for All Songs from Playlists */}
-            <div className="bg-gray-800 p-6 rounded-lg">
-                <h2 className="text-xl font-semibold mb-2">Playlist with All Unique Songs from Your Playlists</h2>
-                <p className="text-gray-400 mb-4">
-                    Create one or more playlists containing every unique song from all your existing Spotify playlists.
-                </p>
-                <button
-                    onClick={handleCreateAllSongsPlaylist}
-                    disabled={isAnyCurationLoading}
-                    className="bg-orange-600 hover:bg-orange-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
-                >
-                    {isAllSongsLoading ? 'Creating...' : "Create All My Playlists Songs"}
-                </button>
-                {isAllSongsLoading && (
-                    <button
-                        onClick={handleCancelAllSongsPlaylist}
-                        className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
-                    >
-                        Cancel
-                    </button>
-                )}
-                {isAllSongsLoading && (
-                    <div className="mt-4">
-                        <div className="w-full bg-gray-600 rounded-full h-2.5">
-                            <div className="bg-orange-500 h-2.5 rounded-full" style={{ width: `${allSongsProgress}%` }}></div>
-                        </div>
-                        <p className="text-center text-sm text-gray-300 mt-1">{Math.round(allSongsProgress)}%</p>
-                    </div>
-                )}
-            </div>
-
-            {/* NEW SECTION: AI-Powered Genre Mix Playlist Creator */}
-            <div className="bg-gray-800 p-6 rounded-lg">
-                <h2 className="text-xl font-semibold mb-2">AI-Powered Genre Mix Playlist - Genre Logger</h2>
-                <p className="text-gray-400 mb-4">
-                    Collects all unique genres from artists in your playlists and logs them to the console.
-                </p>
-                <button
-                    onClick={handleCreateGenreMixPlaylist}
-                    disabled={isAnyCurationLoading}
-                    className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
-                >
-                    {isGenreMixLoading ? 'Collecting Genres...' : "Collect & Log Genres"}
-                </button>
-                {isGenreMixLoading && (
-                    <button
-                        onClick={handleCancelGenreMixPlaylist}
-                        className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
-                    >
-                        Cancel
-                    </button>
-                )}
-                {isGenreMixLoading && (
-                    <div className="mt-4">
-                        <div className="w-full bg-gray-600 rounded-full h-2.5">
-                            <div className="bg-blue-500 h-2.5 rounded-full" style={{ width: `${genreMixProgress}%` }}></div>
-                        </div>
-                        <p className="text-center text-sm text-gray-300 mt-1">{Math.round(genreMixProgress)}%</p>
-                    </div>
-                )}
-            </div>
-
-            <div className="bg-gray-800 p-6 rounded-lg">
-                <h2 className="text-xl font-semibold mb-2">AI-Powered Playlist Creator</h2>
-                <p className="text-gray-400 mb-4">
-                    Describe the kind of playlist you want, and let AI build it for you.
-                </p>
-                <div className="space-y-4">
-                     <div>
-                         <label className="block mb-1 text-sm font-medium text-gray-300">Playlist Name</label>
-                         <input type="text" value={customPlaylistName} onChange={e => setCustomPlaylistName(e.target.value)} placeholder="My Awesome Mix" className="w-full p-2 bg-gray-700 rounded-md border-gray-600" />
-                     </div>
-                     <div>
-                         <label className="block mb-1 text-sm font-medium text-gray-300">Describe your playlist</label>
-                         <textarea value={aiPrompt} onChange={e => setAiPrompt(e.target.value)} placeholder="e.g., an upbeat roadtrip playlist with 90s alternative rock" rows="3" className="w-full p-2 bg-gray-700 rounded-md border-gray-600"></textarea>
-                     </div>
+                    )}
                 </div>
-                <button
-                    onClick={handleCreateAiPlaylist}
-                    disabled={isAnyCurationLoading}
-                    className="mt-6 bg-green-600 hover:bg-green-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
-                >
-                    {isCustomLoading ? 'Creating...' : "Create AI Playlist"}
-                </button>
-                {isCustomLoading && (
+
+                <div className="bg-gray-800 p-6 rounded-lg">
+                    <h2 className="text-xl font-semibold mb-2">Playlist with All Unique Songs from Your Playlists</h2>
+                    <p className="text-gray-400 mb-4">
+                        Create one or more playlists containing every unique song from all your existing Spotify playlists.
+                    </p>
                     <button
-                        onClick={handleCancelAiPlaylist}
-                        className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
+                        onClick={handleCreateAllSongsPlaylist}
+                        disabled={isAnyCurationLoading}
+                        className="bg-orange-600 hover:bg-orange-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
                     >
-                        Cancel
+                        {isAllSongsLoading ? 'Creating...' : "Create All My Playlists Songs"}
                     </button>
-                )}
+                    {isAllSongsLoading && (
+                        <button
+                            onClick={handleCancelAllSongsPlaylist}
+                            className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
+                        >
+                            Cancel
+                        </button>
+                    )}
+                    {isAllSongsLoading && (
+                        <div className="mt-4">
+                            <div className="w-full bg-gray-600 rounded-full h-2.5">
+                                <div className="bg-orange-500 h-2.5 rounded-full" style={{ width: `${allSongsProgress}%` }}></div>
+                            </div>
+                            <p className="text-center text-sm text-gray-300 mt-1">{Math.round(allSongsProgress)}%</p>
+                        </div>
+                    )}
+                </div>
+
+                <div className="bg-gray-800 p-6 rounded-lg">
+                    <h2 className="text-xl font-semibold mb-2">AI-Powered Genre Mix Playlist - Genre Logger</h2>
+                    <p className="text-gray-400 mb-4">
+                        Collects all unique genres from artists in your playlists and logs them to the console.
+                    </p>
+                    <button
+                        onClick={handleCreateGenreMixPlaylist}
+                        disabled={isAnyCurationLoading}
+                        className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
+                    >
+                        {isGenreMixLoading ? 'Collecting Genres...' : "Collect & Log Genres"}
+                    </button>
+                    {isGenreMixLoading && (
+                        <button
+                            onClick={handleCancelGenreMixPlaylist}
+                            className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
+                        >
+                            Cancel
+                        </button>
+                    )}
+                    {isGenreMixLoading && (
+                        <div className="mt-4">
+                            <div className="w-full bg-gray-600 rounded-full h-2.5">
+                                <div className="bg-blue-500 h-2.5 rounded-full" style={{ width: `${genreMixProgress}%` }}></div>
+                            </div>
+                            <p className="text-center text-sm text-gray-300 mt-1">{Math.round(genreMixProgress)}%</p>
+                        </div>
+                    )}
+                </div>
+
+                <div className="bg-gray-800 p-6 rounded-lg">
+                    <h2 className="text-xl font-semibold mb-2">AI-Powered Playlist Creator</h2>
+                    <p className="text-gray-400 mb-4">
+                        Describe the kind of playlist you want, and let AI build it for you. The AI will generate a playlist with 90 songs.
+                    </p>
+                    <div className="space-y-4">
+                        <div>
+                            <label className="block mb-1 text-sm font-medium text-gray-300">Playlist Name</label>
+                            <input type="text" value={customPlaylistName} onChange={e => setCustomPlaylistName(e.target.value)} placeholder="My Awesome Mix" className="w-full p-2 bg-gray-700 rounded-md border-gray-600" />
+                        </div>
+                        <div>
+                            <label className="block mb-1 text-sm font-medium text-gray-300">Describe your playlist</label>
+                            <textarea value={aiPrompt} onChange={e => setAiPrompt(e.target.value)} placeholder="e.g., an upbeat roadtrip playlist with 90s alternative rock" rows="3" className="w-full p-2 bg-gray-700 rounded-md border-gray-600"></textarea>
+                        </div>
+                    </div>
+                    <button
+                        onClick={handleCreateAiPlaylist}
+                        disabled={isAnyCurationLoading}
+                        className="mt-6 bg-green-600 hover:bg-green-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
+                    >
+                        {isCustomLoading ? 'Creating...' : "Create AI Playlist"}
+                    </button>
+                    {isCustomLoading && (
+                        <button
+                            onClick={handleCancelAiPlaylist}
+                            className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
+                        >
+                            Cancel
+                        </button>
+                    )}
+                </div>
             </div>
         </div>
     );
