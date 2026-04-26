@@ -351,9 +351,9 @@ export default function App() {
 
         try {
             const { year, month, day } = getYesterdayDateParts();
-            const proxyResponse = await fetch(`http://localhost:3001/wqxr-playlist?year=${year}&month=${month}&day=${day}`, { signal });
+            const proxyResponse = await fetch(`/api/wqxr-playlist?year=${year}&month=${month}&day=${day}`, { signal });
             
-            if (!proxyResponse.ok) throw new Error('Failed to fetch data from proxy server. Make sure it is running.');
+            if (!proxyResponse.ok) throw new Error('Failed to fetch playlist data from WQXR.');
     
             const data = await proxyResponse.json();
             const wqxrTracks = data.tracks;
