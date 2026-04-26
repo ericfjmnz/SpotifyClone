@@ -1,11 +1,9 @@
 import React, { useState, useEffect, useCallback, createContext, useContext, useRef } from 'react';
 
 // --- Spotify API Configuration ---
-// The redirect URI is set to the current window's origin.
 const REDIRECT_URI = window.location.origin;
 const AUTH_ENDPOINT = "https://accounts.spotify.com/authorize";
 const TOKEN_ENDPOINT = "https://accounts.spotify.com/api/token";
-// Scopes define the permissions the app is requesting from the user.
 const SCOPES = [
     "user-read-private",
     "user-read-email",
@@ -17,18 +15,12 @@ const SCOPES = [
     "user-read-recently-played",
     "playlist-read-collaborative",
     "user-read-currently-playing",
-    "streaming", // Required for Web Playback SDK
-    "user-read-playback-state", // Required for Web Playback SDK
-    "user-modify-playback-state" // Required for Web Playback SDK
+    "streaming",
+    "user-read-playback-state",
+    "user-modify-playback-state"
 ].join(" ");
 
-
-// --- React Context for State Management ---
-// AppContext provides a way to pass data through the component tree without prop-drilling.
 const AppContext = createContext();
-
-// --- PKCE Helper Functions ---
-// These functions are used for the secure PKCE authentication flow.
 
 function generateCodeVerifier(length) {
     let text = '';
@@ -41,7 +33,6 @@ function generateCodeVerifier(length) {
 
 async function generateCodeChallenge(codeVerifier) {
     const data = new TextEncoder().encode(codeVerifier);
-    // Corrected from Uint9Array to Uint8Array
     const digest = await window.crypto.subtle.digest('SHA-256', data);
     return btoa(String.fromCharCode.apply(null, [...new Uint8Array(digest)]))
         .replace(/\+/g, '-')
@@ -49,14 +40,10 @@ async function generateCodeChallenge(codeVerifier) {
         .replace(/=+$/, '');
 }
 
-// --- Login Screen Component ---
-// This component handles the initial user login and Spotify authorization.
 function LoginScreen() {
     const [clientId, setClientId] = useState("");
     const [loginError, setLoginError] = useState("");
-    const [copied, setCopied] = useState(false);
     
-    // On component mount, check for a stored client ID or any login errors from the redirect.
     useEffect(() => {
         const storedClientId = window.localStorage.getItem("spotify_client_id");
         if (storedClientId) {
@@ -70,7 +57,6 @@ function LoginScreen() {
         }
     }, []);
 
-    // Handles the login process by redirecting the user to Spotify's authorization page.
     const handleLogin = async (e) => {
         e.preventDefault();
         if (clientId) {
@@ -93,23 +79,6 @@ function LoginScreen() {
         } else {
             setLoginError("Please enter a valid Spotify Client ID.");
         }
-    };
-    
-    // Copies the Redirect URI to the clipboard for easy setup in the Spotify Developer Dashboard.
-    const copyToClipboard = () => {
-        const textToCopy = REDIRECT_URI;
-        const textArea = document.createElement("textarea");
-        textArea.value = textToCopy;
-        document.body.appendChild(textArea);
-        textArea.select();
-        try {
-            document.execCommand('copy');
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
-        } catch (err) {
-            console.error('Failed to copy text: ', err);
-        }
-        document.body.removeChild(textArea);
     };
 
     return (
@@ -139,9 +108,6 @@ function LoginScreen() {
     );
 }
 
-
-// --- Main App Component ---
-// This is the root component that manages the overall application state and layout.
 export default function App() {
     const [token, setToken] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -154,36 +120,34 @@ export default function App() {
     const [isPaused, setIsPaused] = useState(true);
     const [position, setPosition] = useState(0);
     const [sdkLoaded, setSdkLoaded] = useState(false);
-    const [libraryVersion, setLibraryVersion] = useState(0); // Used to trigger refetches
+    const [libraryVersion, setLibraryVersion] = useState(0);
     const [profile, setProfile] = useState(null);
     const [playlistToEdit, setPlaylistToEdit] = useState(null);
     const [playlistToDelete, setPlaylistToDelete] = useState(null);
 
-    // --- Playlist Creator states (LIFTED from PlaylistCreator) ---
     const [creatorStatus, setCreatorStatus] = useState('');
     const [creatorError, setCreatorError] = useState('');
-    const [createdPlaylist, setCreatedPlaylist] = useState(null); // Can be used to show link to newly created playlist
-    const [showCreatorStatus, setShowCreatorStatus] = useState(false); // New state to control status visibility
-    const [fadeCreatorStatusOut, setFadeCreatorStatusOut] = useState(false); // New state for fade effect
+    const [createdPlaylist, setCreatedPlaylist] = useState(null);
+    const [showCreatorStatus, setShowCreatorStatus] = useState(false);
+    const [fadeCreatorStatusOut, setFadeCreatorStatusOut] = useState(false);
 
     const [isWqxrLoading, setIsWqxrLoading] = useState(false);
     const [wqxrProgress, setWqxrProgress] = useState(0);
-    const [wqxrAbortController, setWqxrAbortController] = useState(null); // New AbortController state
+    const [wqxrAbortController, setWqxrAbortController] = useState(null);
 
     const [isCustomLoading, setIsCustomLoading] = useState(false);
     const [customPlaylistName, setCustomPlaylistName] = useState('');
     const [aiPrompt, setAiPrompt] = useState("");
-    const [customAbortController, setCustomAbortController] = useState(null); // New AbortController state
+    const [customAbortController, setCustomAbortController] = useState(null);
 
     const [isTopTracksLoading, setIsTopTracksLoading] = useState(false);
     const [topTracksProgress, setTopTracksProgress] = useState(0);
-    const [topTracksAbortController, setTopTracksAbortController] = useState(null); // New AbortController state
+    const [topTracksAbortController, setTopTracksAbortController] = useState(null);
 
     const [isAllSongsLoading, setIsAllSongsLoading] = useState(false);
     const [allSongsProgress, setAllSongsProgress] = useState(0);
-    const [allSongsAbortController, setAllSongsAbortController] = useState(null); // New AbortController state
+    const [allSongsAbortController, setAllSongsAbortController] = useState(null);
     
-    // Detailed states for All Playlists progression
     const [allSongsPhase, setAllSongsPhase] = useState('');
     const [allSongsPlaylistsFound, setAllSongsPlaylistsFound] = useState(0);
     const [allSongsPlaylistsProcessed, setAllSongsPlaylistsProcessed] = useState(0);
@@ -197,9 +161,6 @@ export default function App() {
     const [selectedGenres, setSelectedGenres] = useState([]);
     const [genreFusionName, setGenreFusionName] = useState("");
 
-    // Helper function to introduce a delay (moved outside of component/hooks)
-    const delay = (ms) => new Promise(res => setTimeout(res, ms));
-
     const logout = useCallback(() => {
         setToken(null);
         if(player) player.disconnect();
@@ -211,21 +172,31 @@ export default function App() {
         setSelectedPlaylistId(null);
     }, [player]);
     
-    // Robust central fetcher with integrated Rate Limiting handling
+    // FIXED: Smart Headers for spotifyFetch
     const spotifyFetch = useCallback(async (endpoint, options = {}) => {
         const maxRetries = 3;
         let retryCount = 0;
         let currentDelay = 100;
 
         while (retryCount <= maxRetries) {
-            const response = await fetch(`https://api.spotify.com/v1$${endpoint}`, {
+            // Determine if we are sending data (POST, PUT, PATCH)
+            const isBodyRequest = options.method && ['POST', 'PUT', 'PATCH'].includes(options.method.toUpperCase());
+            
+            const headers = {
+                'Authorization': `Bearer ${token}`,
+                ...options.headers,
+            };
+
+            // ONLY add Content-Type if we are sending a body. Spotify rejects GETs with Content-Type.
+            if (isBodyRequest) {
+                headers['Content-Type'] = 'application/json';
+            }
+
+            const response = await fetch(`https://api.spotify.com/v1${endpoint}`, {
                 ...options,
-                headers: {
-                    ...options.headers,
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
+                headers,
             });
+            
             if (response.status === 401) {
                 logout();
                 throw new Error("User is not authenticated");
@@ -244,14 +215,11 @@ export default function App() {
         throw new Error("Max retries reached for Spotify API");
     }, [token, logout]);
 
-    // Effect to manage status message visibility (NO AUTO-HIDE)
-    // The status message will only disappear when the "X" button is clicked.
     useEffect(() => {
         if (creatorStatus || creatorError) {
             setShowCreatorStatus(true);
-            setFadeCreatorStatusOut(false); // Ensure it's fully opaque when displayed
+            setFadeCreatorStatusOut(false);
         } else {
-            // Only hide immediately if there's no status and no error
             setShowCreatorStatus(false);
         }
     }, [creatorStatus, creatorError]);
@@ -271,9 +239,9 @@ export default function App() {
         setAiPrompt('');
     }, []);
 
-    // NEW: Custom hook for data fetching helpers
+    const delay = (ms) => new Promise(res => setTimeout(res, ms));
+
     const useSpotifyDataHelpers = (token) => {
-        // fetchUniqueTrackUisAndArtistIdsFromPlaylists updated for speed and tracking
         const fetchUniqueTrackUisAndArtistIdsFromPlaylists = useCallback(async (signal, onProgress) => {
             let allPlaylists = [];
             let nextPlaylistsUrl = '/me/playlists?limit=50';
@@ -291,7 +259,7 @@ export default function App() {
                 
                 if (onProgress) onProgress({ phase: 'fetching_playlists', found: allPlaylists.length });
                 nextPlaylistsUrl = data.next ? data.next.replace('https://api.spotify.com/v1', '') : null;
-                await delay(50); // Add a small delay between playlist page fetches
+                await delay(50);
             }
 
             if (allPlaylists.length === 0) {
@@ -304,7 +272,6 @@ export default function App() {
 
             if (onProgress) onProgress({ phase: 'fetching_tracks', processed: 0, total: allPlaylists.length });
 
-            // Concurrent chunking to fetch playlist tracks dramatically faster
             const concurrency = 5; 
             for (let i = 0; i < allPlaylists.length; i += concurrency) {
                 const chunk = allPlaylists.slice(i, i + concurrency);
@@ -347,13 +314,14 @@ export default function App() {
 
     const { fetchUniqueTrackUisAndArtistIdsFromPlaylists } = useSpotifyDataHelpers(token);
 
+
     const handleCreateWQXRPlaylist = useCallback(async () => {
         if(!profile) {
             setCreatorError('Could not get user profile. Please try again.');
             return;
         }
-        const controller = new AbortController(); // Create new AbortController
-        setWqxrAbortController(controller); // Store it in state
+        const controller = new AbortController();
+        setWqxrAbortController(controller);
         const signal = controller.signal;
 
         setIsWqxrLoading(true);
@@ -364,7 +332,7 @@ export default function App() {
 
         try {
             const { year, month, day } = getYesterdayDateParts();
-            const proxyResponse = await fetch(`http://localhost:3001/wqxr-playlist?year=${year}&month=${month}&day=${day}`, { signal }); // Pass signal
+            const proxyResponse = await fetch(`http://localhost:3001/wqxr-playlist?year=${year}&month=${month}&day=${day}`, { signal });
             
             if (!proxyResponse.ok) throw new Error('Failed to fetch data from proxy server. Make sure it is running.');
     
@@ -384,7 +352,7 @@ export default function App() {
                 }
                 const progress = ((index + 1) / wqxrTracks.length) * 100;
                 setWqxrProgress(progress);
-                await delay(50); // Delay for search requests
+                await delay(50);
             }
     
             if (trackUris.length === 0) throw new Error('Could not find any of the WQXR tracks on Spotify.');
@@ -418,12 +386,12 @@ export default function App() {
         } finally {
             setIsWqxrLoading(false);
             setWqxrProgress(0);
-            setWqxrAbortController(null); // Clear controller reference
+            setWqxrAbortController(null);
         }
     }, [profile, token, getYesterdayDateParts, setLibraryVersion, spotifyFetch]);
 
     const handleCancelWQXRPlaylist = useCallback(() => {
-        wqxrAbortController?.abort(); // Abort the ongoing fetch
+        wqxrAbortController?.abort();
     }, [wqxrAbortController]);
 
 
@@ -502,7 +470,7 @@ export default function App() {
                 const result = await geminiResponse.json();
                 if (!result.candidates?.[0]?.content?.parts?.[0]?.text) {
                     console.warn(`AI response for batch ${i + 1} was empty or invalid.`);
-                    continue; // Skip to the next batch
+                    continue; 
                 }
     
                 const songsText = result.candidates[0].content.parts[0].text;
@@ -602,7 +570,7 @@ export default function App() {
             const page1 = await fetchTopTracksPage(0);
             setTopTracksProgress(25);
 
-            await delay(100); // Small delay to avoid hitting rate limits too quickly
+            await delay(100);
 
             setCreatorStatus('Fetching your top 100 tracks (Page 2/2)...');
             const page2 = await fetchTopTracksPage(50);
@@ -648,7 +616,7 @@ export default function App() {
         } finally {
             setIsTopTracksLoading(false);
             setTopTracksProgress(0);
-            setTopTracksAbortController(null); // Clear controller reference
+            setTopTracksAbortController(null); 
         }
     }, [profile, token, setLibraryVersion, spotifyFetch]);
 
@@ -690,7 +658,7 @@ export default function App() {
                     setAllSongsPlaylistsProcessed(info.processed);
                     setAllSongsPlaylistsFound(info.total);
                     setCreatorStatus(`Extracting unique songs (${info.processed} / ${info.total} playlists processed)...`);
-                    setAllSongsProgress(10 + (info.processed / info.total) * 70); // Maps phase 2 to 10%-80%
+                    setAllSongsProgress(10 + (info.processed / info.total) * 70); 
                 }
             });
             
@@ -700,7 +668,7 @@ export default function App() {
                 throw new Error('Could not find any unique songs across your playlists.');
             }
 
-            const SPOTIFY_PLAYLIST_LIMIT = 10000;
+            const SPOTIFY_PLAYLIST_LIMIT = 10000; 
             const totalSongs = trackUrisArray.length;
             const numberOfPlaylists = Math.ceil(totalSongs / SPOTIFY_PLAYLIST_LIMIT);
             const createdPlaylistsInfo = [];
@@ -735,10 +703,9 @@ export default function App() {
                         body: JSON.stringify({ uris: chunk }), signal
                     });
 
-                    // Update UI steps for addition
                     setAllSongsTracksAdded(prev => prev + chunk.length);
                     const currentOverallProgress = (startIdx + i + chunk.length);
-                    setAllSongsProgress(80 + (currentOverallProgress / totalSongs) * 20); // Maps phase 3 to 80%-100%
+                    setAllSongsProgress(80 + (currentOverallProgress / totalSongs) * 20); 
                     
                     setCreatorStatus(`Adding ${chunk.length} songs to "${newPlaylist.name}"...`);
                     await delay(50);
@@ -1096,7 +1063,7 @@ export default function App() {
             isCustomLoading, customPlaylistName, setCustomPlaylistName, aiPrompt, setAiPrompt, handleCreateAiPlaylist, handleCancelAiPlaylist, resetCustomForm,
             isTopTracksLoading, topTracksProgress, handleCreateTopTracksPlaylist, handleCancelTopTracksPlaylist,
             isAllSongsLoading, allSongsProgress, handleCreateAllSongsPlaylist, handleCancelAllSongsPlaylist,
-            allSongsPhase, allSongsPlaylistsFound, allSongsPlaylistsProcessed, allSongsTotalToProcess, allSongsTracksAdded, // Exposing detailed states
+            allSongsPhase, allSongsPlaylistsFound, allSongsPlaylistsProcessed, allSongsTotalToProcess, allSongsTracksAdded,
             isGenreFusionLoading, genreFusionProgress, handleFetchAvailableGenres, handleCreateGenreFusionPlaylist, handleCancelGenreFusion, availableGenres, selectedGenres, setSelectedGenres, genreFusionName, setGenreFusionName,
             getYesterdayDateParts, // Pass getYesterdayDateParts to context
             spotifyFetch
@@ -1341,14 +1308,13 @@ function PlayerBar() {
 
 
 // --- API Fetch Hook ---
-// A custom hook to simplify making authenticated requests to the Spotify API.
 const useSpotifyApi = (url, deps = []) => { 
     const { spotifyFetch } = useContext(AppContext);
     const [data, setData] = useState(null);
     const [error, setError] = useState(null);
     const [loading, setLoading] = useState(true);
 
-    const CACHE_DURATION_MS = 5 * 60 * 1000; // 5 minutes
+    const CACHE_DURATION_MS = 5 * 60 * 1000;
 
     useEffect(() => {
         let isMounted = true;
@@ -1358,7 +1324,6 @@ const useSpotifyApi = (url, deps = []) => {
                 return;
             }
 
-            // --- Cache Read Attempt ---
             try {
                 const cachedData = localStorage.getItem(url);
                 if (cachedData) {
@@ -1376,8 +1341,6 @@ const useSpotifyApi = (url, deps = []) => {
             } catch (cacheError) {
                 console.warn("Error reading from cache:", cacheError);
             }
-            // --- End Cache Read Attempt ---
-
 
             if (isMounted) setLoading(true);
 
@@ -1388,13 +1351,11 @@ const useSpotifyApi = (url, deps = []) => {
                  }
                 const result = await response.json();
                 
-                // --- Cache Write Attempt ---
                 try {
                     localStorage.setItem(url, JSON.stringify({ data: result, timestamp: Date.now() }));
                 } catch (cacheError) {
                     console.warn("Error writing to cache:", cacheError);
                 }
-                // --- End Cache Write Attempt ---
 
                 if (isMounted) {
                     setData(result);
@@ -1887,7 +1848,6 @@ function PlaylistCreator() {
 }
 
 // --- NEW --- SearchView Component
-// A new component to handle search functionality.
 function SearchView() {
     const { spotifyFetch } = useContext(AppContext);
     const [query, setQuery] = useState("");
@@ -1909,7 +1869,7 @@ function SearchView() {
             const data = await response.json();
             setResults(data);
             setLoading(false);
-        }, 500); // 500ms delay
+        }, 500);
 
         return () => clearTimeout(searchTimer);
     }, [query, spotifyFetch]);
@@ -1941,9 +1901,8 @@ function SearchView() {
     );
 }
 
-// --- Search Result Display Components ---
 function TrackResults({ tracks }) {
-    const { playTrack } = usePlayerActions(); // Helper hook for player actions
+    const { playTrack } = usePlayerActions();
     const formatDuration = (ms) => {
         const minutes = Math.floor(ms / 60000);
         const seconds = ((ms % 60000) / 1000).toFixed(0);
@@ -1989,12 +1948,10 @@ function AlbumResults({ albums }) {
     )
 }
 
-// Custom hook to abstract player logic
 function usePlayerActions() {
     const { spotifyFetch, deviceId } = useContext(AppContext);
     const playTrack = (trackUri) => {
         if (!deviceId) {
-            // In a real app, you'd show a non-blocking notification here.
             console.error("No active player found.");
             return;
         }
@@ -2079,7 +2036,6 @@ function DeleteConfirmationModal({ playlist, onClose }) {
         setIsDeleting(true);
         setError("");
         try {
-            // Unfollowing a playlist is the standard way to "delete" it from a user's library
             const response = await spotifyFetch(`/playlists/${playlist.id}/followers`, {
                 method: 'DELETE',
             });
