@@ -1351,8 +1351,12 @@ export default function App() {
         return () => clearInterval(interval);
     }, [isPaused]);
     
-    if (isLoading && !token) {
+    if (isLoading) {
         return <div className="h-screen w-full flex items-center justify-center bg-black text-white"><p>Loading...</p></div>;
+    }
+
+    if (!token) {
+        return <LoginScreen />;
     }
 
     return (
