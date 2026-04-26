@@ -85,7 +85,7 @@ function LoginScreen() {
         <div className="h-screen w-full flex items-center justify-center bg-gray-900 text-white p-4">
             <div className="text-center bg-gray-800 p-8 rounded-lg shadow-2xl max-w-2xl w-full">
                 <h1 className="text-4xl font-bold mb-2">Connect to Spotify</h1>
-                <p className="text-gray-400 mb-6">Please send your Spotify email to efjmnz@hotmail.com and I will send you the Client ID.</p>
+                <p className="text-gray-400 mb-6">Please send your Spotify email and I will send you the Client ID.</p>
                 
                 <form onSubmit={handleLogin} className="flex flex-col gap-4">
                     <input
@@ -1263,6 +1263,7 @@ export default function App() {
         const code = params.get("code");
 
         const getToken = async (authCode) => {
+            window.history.replaceState({}, document.title, window.location.pathname);
             const verifier = window.localStorage.getItem("code_verifier");
 
             const params = new URLSearchParams();
@@ -1284,6 +1285,7 @@ export default function App() {
                 const { access_token } = await result.json();
                 window.localStorage.setItem("spotify_token", access_token);
                 setToken(access_token);
+                window.history.replaceState({}, document.title, window.location.pathname);
             } catch (error) {
                 console.error("Error fetching token:", error);
                 logout();
