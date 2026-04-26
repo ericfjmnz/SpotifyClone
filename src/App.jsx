@@ -155,21 +155,21 @@ export default function App() {
     const [consolidateTotalToProcess, setConsolidateTotalToProcess] = useState(0);
     const [consolidateTracksAdded, setConsolidateTracksAdded] = useState(0);
 
-    // --- CATEGORY MIX STATES ---
-    const [isCategoryScanLoading, setIsCategoryScanLoading] = useState(false);
-    const [categoryScanProgress, setCategoryScanProgress] = useState(0);
-    const [categoryScanPhase, setCategoryScanPhase] = useState('');
-    const [categoryScanAbortController, setCategoryScanAbortController] = useState(null);
-    const [availableCategories, setAvailableCategories] = useState([]);
-    const [selectedCategories, setSelectedCategories] = useState([]);
-    const [categoryMixName, setCategoryMixName] = useState("");
-    const [categoryFilterData, setCategoryFilterData] = useState(null);
-    const [categoryScanPlaylistsTotal, setCategoryScanPlaylistsTotal] = useState(0);
-    const [categoryScanPlaylistsProcessed, setCategoryScanPlaylistsProcessed] = useState(0);
-    const [categoryScanArtistsTotal, setCategoryScanArtistsTotal] = useState(0);
-    const [categoryScanArtistsProcessed, setCategoryScanArtistsProcessed] = useState(0);
-    const [categoryScanTracksAdded, setCategoryScanTracksAdded] = useState(0);
-    const [categoryScanTracksTotal, setCategoryScanTracksTotal] = useState(0);
+    // --- LIBRARY GENRE FILTER STATES ---
+    const [isLibraryScanLoading, setIsLibraryScanLoading] = useState(false);
+    const [libraryScanProgress, setLibraryScanProgress] = useState(0);
+    const [libraryScanPhase, setLibraryScanPhase] = useState('');
+    const [libraryScanAbortController, setLibraryScanAbortController] = useState(null);
+    const [availableLibraryGenres, setAvailableLibraryGenres] = useState([]);
+    const [selectedLibraryGenres, setSelectedLibraryGenres] = useState([]);
+    const [libraryFilterName, setLibraryFilterName] = useState("");
+    const [libraryFilterData, setLibraryFilterData] = useState(null);
+    const [libraryScanTracksFetched, setLibraryScanTracksFetched] = useState(0);
+    const [libraryScanTracksTotalToFetch, setLibraryScanTracksTotalToFetch] = useState(0);
+    const [libraryScanArtistsTotal, setLibraryScanArtistsTotal] = useState(0);
+    const [libraryScanArtistsProcessed, setLibraryScanArtistsProcessed] = useState(0);
+    const [libraryScanTracksAdded, setLibraryScanTracksAdded] = useState(0);
+    const [libraryScanTracksTotal, setLibraryScanTracksTotal] = useState(0);
 
     const [isGenreFusionLoading, setIsGenreFusionLoading] = useState(false);
     const [genreFusionProgress, setGenreFusionProgress] = useState(0);
@@ -184,9 +184,6 @@ export default function App() {
         window.localStorage.removeItem("spotify_token");
         window.localStorage.removeItem("spotify_client_id");
         window.localStorage.removeItem("code_verifier");
-        
-        // Remove replaceState logic as it errors in Canvas iframe
-        // window.history.replaceState(null, null, window.location.pathname);
         
         setView('home');
         setSelectedPlaylistId(null);
@@ -770,26 +767,26 @@ export default function App() {
         consolidateAbortController?.abort();
     }, [consolidateAbortController]);
 
-    const handleScanConsolidatedForCategories = useCallback(async () => {
+    const handleScanConsolidatedForGenres = useCallback(async () => {
         if (!profile) {
             setCreatorError('Could not get user profile. Please try again.');
             return;
         }
         const controller = new AbortController();
-        setCategoryScanAbortController(controller);
+        setLibraryScanAbortController(controller);
         const signal = controller.signal;
 
-        setIsCategoryScanLoading(true);
+        setIsLibraryScanLoading(true);
         setCreatorError('');
-        setAvailableCategories([]);
-        setCategoryScanProgress(0);
+        setAvailableLibraryGenres([]);
+        setLibraryScanProgress(0);
         
-        setCategoryScanPlaylistsTotal(0);
-        setCategoryScanPlaylistsProcessed(0);
-        setCategoryScanArtistsTotal(0);
-        setCategoryScanArtistsProcessed(0);
+        setLibraryScanTracksTotalToFetch(0);
+        setLibraryScanTracksFetched(0);
+        setLibraryScanArtistsTotal(0);
+        setLibraryScanArtistsProcessed(0);
         
-        setCategoryScanPhase('fetching_playlists');
+        setLibraryScanPhase('fetching_playlists');
         setCreatorStatus('Looking for your consolidated playlists...');
 
         try {
@@ -836,15 +833,17 @@ export default function App() {
                 }
             }
 
-            setCategoryScanPhase('fetching_tracks');
-            setCategoryScanPlaylistsTotal(playlistsToScan.length);
+            const totalTracksToFetch = playlistsToScan.reduce((sum, p) => sum + p.tracks.total, 0);
+            setLibraryScanTracksTotalToFetch(totalTracksToFetch);
+
+            setLibraryScanPhase('fetching_tracks');
             setCreatorStatus(`Found ${playlistsToScan.length} recent consolidated playlist(s). Extracting songs...`);
-            setCategoryScanProgress(10);
+            setLibraryScanProgress(10);
 
             // 2. Fetch tracks from only those playlists
             const trackDetailsMap = new Map();
             const uniqueArtistIds = new Set();
-            let processedCount = 0;
+            let fetchedTracksCount = 0;
 
             for (const playlist of playlistsToScan) {
                 let nextTracksUrl = playlist.tracks.href.replace('https://api.spotify.com/v1', '');
@@ -852,6 +851,7 @@ export default function App() {
                     const response = await spotifyFetch(nextTracksUrl, { signal });
                     const data = await response.json();
                     if (data.items) {
+                        fetchedTracksCount += data.items.length;
                         data.items.forEach(item => {
                             if (item.track && item.track.uri) {
                                 if (!trackDetailsMap.has(item.track.uri)) {
@@ -864,11 +864,10 @@ export default function App() {
                             }
                         });
                     }
+                    setLibraryScanTracksFetched(fetchedTracksCount);
+                    setLibraryScanProgress(10 + (fetchedTracksCount / totalTracksToFetch) * 30); // 10% to 40%
                     nextTracksUrl = data.next ? data.next.replace('https://api.spotify.com/v1', '') : null;
                 }
-                processedCount++;
-                setCategoryScanPlaylistsProcessed(processedCount);
-                setCategoryScanProgress(10 + (processedCount / playlistsToScan.length) * 30); // 10% to 40%
             }
 
             const artistIdsArray = Array.from(uniqueArtistIds);
@@ -876,13 +875,15 @@ export default function App() {
                 throw new Error('Could not find any artists in your consolidated playlists.');
             }
             
-            setCategoryScanPhase('fetching_genres');
-            setCategoryScanArtistsTotal(artistIdsArray.length);
-            setCreatorStatus(`Found ${artistIdsArray.length} unique artists. Fetching specific genres...`);
+            setLibraryScanPhase('fetching_genres');
+            setLibraryScanArtistsTotal(artistIdsArray.length);
+            setCreatorStatus(`Found ${artistIdsArray.length} unique artists. Fetching their specific genres...`);
             
-            // 3. Fetch Artist Genres
+            // 3. Fetch specific artist genres
             const artistToGenres = new Map();
+            const allSpecificGenres = new Set();
             const batchSize = 50;
+
             for (let i = 0; i < artistIdsArray.length; i += batchSize) {
                 const batch = artistIdsArray.slice(i, i + batchSize);
                 const response = await spotifyFetch(`/artists?ids=${batch.join(',')}`, { signal });
@@ -891,42 +892,15 @@ export default function App() {
                     data.artists.forEach(artist => {
                         if(artist && artist.genres) {
                              artistToGenres.set(artist.id, artist.genres);
+                             artist.genres.forEach(g => allSpecificGenres.add(g));
                         }
                     });
                 }
                 const currentProcessed = Math.min(i + batch.length, artistIdsArray.length);
-                setCategoryScanArtistsProcessed(currentProcessed);
-                setCategoryScanProgress(40 + (currentProcessed / artistIdsArray.length) * 40); // 40% to 80%
+                setLibraryScanArtistsProcessed(currentProcessed);
+                setLibraryScanProgress(40 + (currentProcessed / artistIdsArray.length) * 60); // 40% to 100%
                 await delay(50);
             }
-
-            // 4. Fetch Spotify's broad Categories
-            setCategoryScanPhase('mapping_categories');
-            setCreatorStatus('Fetching Spotify broad categories and cross-referencing...');
-            const categoriesResponse = await spotifyFetch(`/browse/categories?limit=50`, { signal });
-            if (!categoriesResponse.ok) throw new Error("Failed to fetch categories from Spotify");
-            const categoriesData = await categoriesResponse.json();
-            
-            const allCategories = categoriesData.categories.items.map(c => c.name);
-
-            // 5. Map artists to broad categories
-            const artistToBroadCategories = new Map();
-            const foundBroadCategories = new Set();
-
-            artistToGenres.forEach((genres, artistId) => {
-                const matchedCats = new Set();
-                genres.forEach(genre => {
-                    const normG = genre.toLowerCase().replace(/[^a-z0-9]/g, '');
-                    allCategories.forEach(cat => {
-                        const normCat = cat.toLowerCase().replace(/[^a-z0-9]/g, '');
-                        if (normG.includes(normCat) || normCat.includes(normG)) {
-                            matchedCats.add(cat);
-                            foundBroadCategories.add(cat);
-                        }
-                    });
-                });
-                artistToBroadCategories.set(artistId, Array.from(matchedCats));
-            });
 
             const trackDetails = Array.from(trackDetailsMap.entries()).map(([uri, artistsSet]) => ({
                 uri,
@@ -935,34 +909,34 @@ export default function App() {
 
             setCategoryFilterData({
                 tracks: trackDetails,
-                artistMap: artistToBroadCategories
+                artistMap: artistToGenres
             });
             
-            setAvailableCategories(Array.from(foundBroadCategories).sort());
-            setCategoryScanProgress(100);
-            setCreatorStatus(`Scan complete! Found ${foundBroadCategories.size} broad categories matching your consolidated library. Select up to 3.`);
+            setAvailableLibraryGenres(Array.from(allSpecificGenres).sort());
+            setLibraryScanProgress(100);
+            setCreatorStatus(`Scan complete! Found ${allSpecificGenres.size} unique genres matching your library. Select up to 3.`);
 
         } catch (e) {
             if (e.name === 'AbortError') {
-                setCreatorStatus('Category scan cancelled.');
+                setCreatorStatus('Library scan cancelled.');
             } else {
                 setCreatorError(e.message);
             }
-            console.error("Error scanning library for categories:", e);
+            console.error("Error scanning library for genres:", e);
         } finally {
-            setIsCategoryScanLoading(false);
-            setCategoryScanProgress(0);
-            setCategoryScanPhase('');
+            setIsLibraryScanLoading(false);
+            setLibraryScanProgress(0);
+            setLibraryScanPhase('');
         }
     }, [profile, spotifyFetch]);
 
-    const handleCreateCategoryPlaylist = useCallback(async () => {
-        if (selectedCategories.length < 1 || selectedCategories.length > 3) {
-            setCreatorError("Please select between 1 and 3 broad categories.");
+    const handleCreateLibraryFilterPlaylist = useCallback(async () => {
+        if (selectedLibraryGenres.length < 1 || selectedLibraryGenres.length > 3) {
+            setCreatorError("Please select between 1 and 3 genres.");
             return;
         }
-        if (!categoryMixName.trim()) {
-            setCreatorError("Please enter a name for your category playlist.");
+        if (!libraryFilterName.trim()) {
+            setCreatorError("Please enter a name for your genre playlist.");
             return;
         }
         if (!categoryFilterData) {
@@ -971,30 +945,30 @@ export default function App() {
         }
     
         const controller = new AbortController();
-        setCategoryScanAbortController(controller);
+        setLibraryScanAbortController(controller);
         const signal = controller.signal;
     
-        setIsCategoryScanLoading(true);
+        setIsLibraryScanLoading(true);
         setCreatorError('');
-        setCategoryScanPhase('filtering_tracks');
-        setCreatorStatus('Filtering your consolidated library to find matching songs...');
-        setCategoryScanTracksAdded(0);
-        setCategoryScanTracksTotal(0);
+        setLibraryScanPhase('filtering_tracks');
+        setCreatorStatus('Filtering your consolidated library to find exact genre matches...');
+        setLibraryScanTracksAdded(0);
+        setLibraryScanTracksTotal(0);
     
         try {
-            // Filter local tracks to find songs that match ALL selected broad categories
+            // Filter local tracks to find songs that match ALL selected specific genres
             const matchedTrackUris = new Set();
 
             categoryFilterData.tracks.forEach(track => {
-                // Gather all broad categories across all artists for this specific track
-                const trackCategories = new Set();
+                // Gather all genres across all artists for this specific track
+                const trackGenres = new Set();
                 track.artistIds.forEach(artistId => {
-                    const artistCats = categoryFilterData.artistMap.get(artistId) || [];
-                    artistCats.forEach(cat => trackCategories.add(cat));
+                    const artistGenres = categoryFilterData.artistMap.get(artistId) || [];
+                    artistGenres.forEach(cat => trackGenres.add(cat));
                 });
                 
-                // Track must contain ALL the categories the user selected
-                const matchesAllSelected = selectedCategories.every(cat => trackCategories.has(cat));
+                // Track MUST contain ALL the genres the user selected (AND logic)
+                const matchesAllSelected = selectedLibraryGenres.every(g => trackGenres.has(g));
                 
                 if (matchesAllSelected) {
                     matchedTrackUris.add(track.uri);
@@ -1004,25 +978,25 @@ export default function App() {
             const finalTrackUris = Array.from(matchedTrackUris);
 
             if(finalTrackUris.length === 0) {
-                throw new Error("No songs found in your library matching all of those specific categories combined.");
+                throw new Error(`No songs found in your library matching all of these genres combined: ${selectedLibraryGenres.join(' + ')}`);
             }
             
-            setCategoryScanPhase('creating_playlist');
-            setCategoryScanTracksTotal(finalTrackUris.length);
-            setCreatorStatus(`Found ${finalTrackUris.length} matching songs. Creating playlist "${categoryMixName}"...`);
+            setLibraryScanPhase('creating_playlist');
+            setLibraryScanTracksTotal(finalTrackUris.length);
+            setCreatorStatus(`Found ${finalTrackUris.length} matching songs. Creating playlist "${libraryFilterName}"...`);
             
             const playlistResponse = await spotifyFetch(`/users/${profile.id}/playlists`, {
                 method: 'POST',
                 body: JSON.stringify({
-                    name: categoryMixName,
-                    description: `A collection of songs from your consolidated library matching ALL of these categories: ${selectedCategories.join(', ')}.`,
+                    name: libraryFilterName,
+                    description: `Filtered from library. Songs matching: ${selectedLibraryGenres.join(' + ')}.`,
                     public: false
                 }),
                 signal
             });
             const newPlaylist = await playlistResponse.json();
     
-            setCategoryScanPhase('adding_tracks');
+            setLibraryScanPhase('adding_tracks');
             const chunkSize = 100;
             
             for (let i = 0; i < finalTrackUris.length; i += chunkSize) {
@@ -1033,43 +1007,43 @@ export default function App() {
                     signal
                 });
                 
-                setCategoryScanTracksAdded(prev => prev + chunk.length);
-                setCategoryScanProgress(((i + chunk.length) / finalTrackUris.length) * 100);
+                setLibraryScanTracksAdded(prev => prev + chunk.length);
+                setLibraryScanProgress(((i + chunk.length) / finalTrackUris.length) * 100);
                 setCreatorStatus(`Adding songs to playlist (${Math.floor((i + chunk.length) / finalTrackUris.length * 100)}%)...`);
                 await delay(100);
             }
     
             setCreatedPlaylist(newPlaylist);
-            setCreatorStatus("Category playlist created successfully!");
+            setCreatorStatus("Filtered genre playlist created successfully!");
             localStorage.removeItem('/me/playlists?limit=50');
             setLibraryVersion(v => v + 1);
-            setSelectedCategories([]);
-            setCategoryMixName("");
+            setSelectedLibraryGenres([]);
+            setLibraryFilterName("");
             
             // Clear local mapping data after successful creation
             setCategoryFilterData(null);
-            setAvailableCategories([]);
+            setAvailableLibraryGenres([]);
     
         } catch (e) {
             if (e.name === 'AbortError') {
-                setCreatorStatus("Category playlist creation cancelled.");
+                setCreatorStatus("Playlist creation cancelled.");
             } else {
                 setCreatorError(e.message);
             }
-            console.error("Error creating category playlist:", e);
+            console.error("Error creating filtered playlist:", e);
         } finally {
-            setIsCategoryScanLoading(false);
-            setCategoryScanAbortController(null);
-            setCategoryScanProgress(0);
-            setCategoryScanPhase('');
-            setCategoryScanTracksAdded(0);
-            setCategoryScanTracksTotal(0);
+            setIsLibraryScanLoading(false);
+            setLibraryScanAbortController(null);
+            setLibraryScanProgress(0);
+            setLibraryScanPhase('');
+            setLibraryScanTracksAdded(0);
+            setLibraryScanTracksTotal(0);
         }
-    }, [profile, spotifyFetch, selectedCategories, categoryMixName, categoryFilterData, setLibraryVersion]);
+    }, [profile, spotifyFetch, selectedLibraryGenres, libraryFilterName, categoryFilterData, setLibraryVersion]);
 
-    const handleCancelCategoryScan = useCallback(() => {
-        categoryScanAbortController?.abort();
-    }, [categoryScanAbortController]);
+    const handleCancelLibraryScan = useCallback(() => {
+        libraryScanAbortController?.abort();
+    }, [libraryScanAbortController]);
 
 
     const handleFetchAvailableGenres = useCallback(async () => {
@@ -1310,7 +1284,7 @@ export default function App() {
                 const { access_token } = await result.json();
                 window.localStorage.setItem("spotify_token", access_token);
                 setToken(access_token);
-                // REMOVED replaceState to fix iframe security errors
+                // Removed history.replaceState to prevent security error in iframe
             } catch (error) {
                 console.error("Error fetching token:", error);
                 logout();
@@ -1392,8 +1366,8 @@ export default function App() {
             isConsolidateLoading, consolidateProgress, handleConsolidatePlaylists, handleCancelConsolidate,
             consolidatePhase, consolidatePlaylistsFound, consolidatePlaylistsProcessed, consolidateTotalToProcess, consolidateTracksAdded,
             isGenreFusionLoading, genreFusionProgress, handleFetchAvailableGenres, handleCreateGenreFusionPlaylist, handleCancelGenreFusion, availableGenres, selectedGenres, setSelectedGenres, genreFusionName, setGenreFusionName,
-            isCategoryScanLoading, categoryScanProgress, categoryScanPhase, handleScanConsolidatedForCategories, handleCreateCategoryPlaylist, handleCancelCategoryScan, availableCategories, selectedCategories, setSelectedCategories, categoryMixName, setCategoryMixName, categoryFilterData,
-            categoryScanPlaylistsTotal, categoryScanPlaylistsProcessed, categoryScanArtistsTotal, categoryScanArtistsProcessed, categoryScanTracksAdded, categoryScanTracksTotal,
+            isLibraryScanLoading, libraryScanProgress, libraryScanPhase, handleScanConsolidatedForGenres, handleCreateLibraryFilterPlaylist, handleCancelLibraryScan, availableLibraryGenres, selectedLibraryGenres, setSelectedLibraryGenres, libraryFilterName, setLibraryFilterName, categoryFilterData,
+            libraryScanTracksTotalToFetch, libraryScanTracksFetched, libraryScanArtistsTotal, libraryScanArtistsProcessed, libraryScanTracksAdded, libraryScanTracksTotal,
             getYesterdayDateParts, // Pass getYesterdayDateParts to context
             spotifyFetch
         }}>
@@ -1902,12 +1876,12 @@ function PlaylistCreator() {
         isConsolidateLoading, consolidateProgress, handleConsolidatePlaylists, handleCancelConsolidate,
         consolidatePhase, consolidatePlaylistsFound, consolidatePlaylistsProcessed, consolidateTotalToProcess, consolidateTracksAdded,
         isGenreFusionLoading, genreFusionProgress, handleFetchAvailableGenres, handleCreateGenreFusionPlaylist, handleCancelGenreFusion, availableGenres, selectedGenres, setSelectedGenres, genreFusionName, setGenreFusionName,
-        isCategoryScanLoading, categoryScanProgress, categoryScanPhase, handleScanConsolidatedForCategories, handleCreateCategoryPlaylist, handleCancelCategoryScan, availableCategories, selectedCategories, setSelectedCategories, categoryMixName, setCategoryMixName, categoryFilterData,
-        categoryScanPlaylistsTotal, categoryScanPlaylistsProcessed, categoryScanArtistsTotal, categoryScanArtistsProcessed, categoryScanTracksAdded, categoryScanTracksTotal,
+        isLibraryScanLoading, libraryScanProgress, libraryScanPhase, handleScanConsolidatedForGenres, handleCreateLibraryFilterPlaylist, handleCancelLibraryScan, availableLibraryGenres, selectedLibraryGenres, setSelectedLibraryGenres, libraryFilterName, setLibraryFilterName, categoryFilterData,
+        libraryScanTracksTotalToFetch, libraryScanTracksFetched, libraryScanArtistsTotal, libraryScanArtistsProcessed, libraryScanTracksAdded, libraryScanTracksTotal,
         getYesterdayDateParts, showCreatorStatus, setShowCreatorStatus, fadeCreatorStatusOut
     } = useContext(AppContext);
 
-    const isAnyCurationLoading = isWqxrLoading || isCustomLoading || isTopTracksLoading || isConsolidateLoading || isGenreFusionLoading || isCategoryScanLoading;
+    const isAnyCurationLoading = isWqxrLoading || isCustomLoading || isTopTracksLoading || isConsolidateLoading || isGenreFusionLoading || isLibraryScanLoading;
     const { year: yesterdayYear, month: yesterdayMonth, day: yesterdayDay } = getYesterdayDateParts();
 
     const handleGenreSelect = (genre) => {
@@ -1916,9 +1890,9 @@ function PlaylistCreator() {
         );
     };
 
-    const handleCategorySelect = (category) => {
-        setSelectedCategories(prev => 
-            prev.includes(category) ? prev.filter(c => c !== category) : (prev.length < 3 ? [...prev, category] : prev)
+    const handleLibraryGenreSelect = (genre) => {
+        setSelectedLibraryGenres(prev => 
+            prev.includes(genre) ? prev.filter(g => g !== genre) : (prev.length < 3 ? [...prev, genre] : prev)
         );
     };
 
@@ -1949,7 +1923,7 @@ function PlaylistCreator() {
                 <div className="bg-gray-800 p-6 rounded-lg">
                     <h2 className="text-xl font-semibold mb-2">Consolidate Your Playlists</h2>
                     <p className="text-gray-400 mb-4">
-                        Consolidate your songs into one seamless list with no duplicates. Once consolidated, you have the option to scan those specific songs and automatically generate new playlists based on broad genre categories!
+                        Consolidate your songs into one seamless list with no duplicates. Once consolidated, you have the option to scan those specific songs and automatically generate new playlists based on specific genres!
                     </p>
 
                     {/* Step 1: Consolidate */}
@@ -2020,110 +1994,110 @@ function PlaylistCreator() {
                         )}
                     </div>
 
-                    {/* Step 2: Category Mix */}
+                    {/* Step 2: Library Genre Filter */}
                     <div className="p-4 bg-gray-900 rounded-md border border-gray-700">
-                        <h3 className="font-semibold text-white mb-2">Step 2: Create Category Mix</h3>
+                        <h3 className="font-semibold text-white mb-2">Step 2: Filter Consolidated Library by Genre</h3>
                         <p className="text-sm text-gray-400 mb-4">
-                            Scans your "All My Playlists Songs" to identify the broad categories within them. You can then quickly filter those exact songs into a new, smaller playlist.
+                            Scans your "All My Playlists Songs" to identify all the exact genres (like Tejano, EDM, Rock) associated with your artists. Filter your songs into a highly specific playlist.
                         </p>
                         <button
-                            onClick={handleScanConsolidatedForCategories}
+                            onClick={handleScanConsolidatedForGenres}
                             disabled={isAnyCurationLoading}
                             className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
                         >
-                            {isCategoryScanLoading && categoryScanPhase !== 'filtering_tracks' && categoryScanPhase !== 'creating_playlist' && categoryScanPhase !== 'adding_tracks' ? 'Scanning...' : "Scan Consolidated Songs for Categories"}
+                            {isLibraryScanLoading && libraryScanPhase !== 'filtering_tracks' && libraryScanPhase !== 'creating_playlist' && libraryScanPhase !== 'adding_tracks' ? 'Scanning...' : "Scan Consolidated Songs for Genres"}
                         </button>
                         
-                        {isCategoryScanLoading && categoryScanPhase !== 'filtering_tracks' && categoryScanPhase !== 'creating_playlist' && categoryScanPhase !== 'adding_tracks' && (
+                        {isLibraryScanLoading && libraryScanPhase !== 'filtering_tracks' && libraryScanPhase !== 'creating_playlist' && libraryScanPhase !== 'adding_tracks' && (
                             <button
-                                onClick={handleCancelCategoryScan}
+                                onClick={handleCancelLibraryScan}
                                 className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
                             >
                                 Cancel
                             </button>
                         )}
                         
-                        {isCategoryScanLoading && (
+                        {isLibraryScanLoading && (
                             <div className="mt-4 bg-gray-900 p-4 rounded-md space-y-4">
                                 <div>
                                     <div className="flex justify-between text-xs text-gray-400 mb-1">
                                         <span>Overall Progress</span>
-                                        <span>{Math.round(categoryScanProgress)}%</span>
+                                        <span>{Math.round(libraryScanProgress)}%</span>
                                     </div>
                                     <div className="w-full bg-gray-700 rounded-full h-2">
-                                        <div className="bg-blue-500 h-2 rounded-full transition-all duration-300" style={{ width: `${categoryScanProgress}%` }}></div>
+                                        <div className="bg-blue-500 h-2 rounded-full transition-all duration-300" style={{ width: `${libraryScanProgress}%` }}></div>
                                     </div>
                                 </div>
 
-                                {(categoryScanPhase === 'fetching_playlists' || categoryScanPlaylistsTotal > 0) && (
+                                {(libraryScanPhase === 'fetching_playlists' || libraryScanTracksTotalToFetch > 0) && (
                                     <div>
                                         <p className="text-xs text-gray-400 mb-1">
-                                            Step 1: Extracting Songs ({categoryScanPlaylistsProcessed} / {categoryScanPlaylistsTotal} playlists processed)
+                                            Step 1: Extracting Songs ({libraryScanTracksFetched} / {libraryScanTracksTotalToFetch} songs extracted)
                                         </p>
                                         <div className="w-full bg-gray-700 rounded-full h-1.5">
-                                            <div className={`h-1.5 rounded-full transition-all duration-300 ${categoryScanPhase === 'fetching_tracks' || categoryScanPhase === 'fetching_playlists' ? 'bg-blue-400' : 'bg-green-500'}`} style={{ width: categoryScanPlaylistsTotal > 0 ? `${(categoryScanPlaylistsProcessed / categoryScanPlaylistsTotal) * 100}%` : '0%' }}></div>
+                                            <div className={`h-1.5 rounded-full transition-all duration-300 ${libraryScanPhase === 'fetching_tracks' || libraryScanPhase === 'fetching_playlists' ? 'bg-blue-400' : 'bg-green-500'}`} style={{ width: libraryScanTracksTotalToFetch > 0 ? `${(libraryScanTracksFetched / libraryScanTracksTotalToFetch) * 100}%` : '0%' }}></div>
                                         </div>
                                     </div>
                                 )}
 
-                                {(categoryScanPhase === 'fetching_genres' || categoryScanPhase === 'mapping_categories' || categoryScanArtistsTotal > 0) && (
+                                {(libraryScanPhase === 'fetching_genres' || libraryScanPhase === 'mapping_categories' || libraryScanArtistsTotal > 0) && (
                                     <div>
                                         <p className="text-xs text-gray-400 mb-1">
-                                            Step 2: Fetching Genres ({categoryScanArtistsProcessed} / {categoryScanArtistsTotal} artists processed)
+                                            Step 2: Fetching Genres ({libraryScanArtistsProcessed} / {libraryScanArtistsTotal} artists processed)
                                         </p>
                                         <div className="w-full bg-gray-700 rounded-full h-1.5">
-                                            <div className={`h-1.5 rounded-full transition-all duration-300 ${categoryScanPhase === 'fetching_genres' ? 'bg-blue-400' : 'bg-green-500'}`} style={{ width: categoryScanArtistsTotal > 0 ? `${(categoryScanArtistsProcessed / categoryScanArtistsTotal) * 100}%` : '0%' }}></div>
+                                            <div className={`h-1.5 rounded-full transition-all duration-300 ${libraryScanPhase === 'fetching_genres' ? 'bg-blue-400' : 'bg-green-500'}`} style={{ width: libraryScanArtistsTotal > 0 ? `${(libraryScanArtistsProcessed / libraryScanArtistsTotal) * 100}%` : '0%' }}></div>
                                         </div>
                                     </div>
                                 )}
 
-                                {(categoryScanPhase === 'filtering_tracks' || categoryScanPhase === 'creating_playlist' || categoryScanPhase === 'adding_tracks') && (
+                                {(libraryScanPhase === 'filtering_tracks' || libraryScanPhase === 'creating_playlist' || libraryScanPhase === 'adding_tracks') && (
                                     <div>
                                         <p className="text-xs text-gray-400 mb-1">
-                                            Step 3: Populating Target Playlist ({categoryScanTracksAdded} / {categoryScanTracksTotal} songs added)
+                                            Step 3: Populating Target Playlist ({libraryScanTracksAdded} / {libraryScanTracksTotal} songs added)
                                         </p>
                                         <div className="w-full bg-gray-700 rounded-full h-1.5">
-                                            <div className={`h-1.5 rounded-full transition-all duration-300 ${categoryScanPhase === 'adding_tracks' ? 'bg-blue-400' : (categoryScanTracksTotal > 0 && categoryScanTracksAdded === categoryScanTracksTotal ? 'bg-green-500' : 'bg-blue-400')}`} style={{ width: categoryScanTracksTotal > 0 ? `${(categoryScanTracksAdded / categoryScanTracksTotal) * 100}%` : '0%' }}></div>
+                                            <div className={`h-1.5 rounded-full transition-all duration-300 ${libraryScanPhase === 'adding_tracks' ? 'bg-blue-400' : (libraryScanTracksTotal > 0 && libraryScanTracksAdded === libraryScanTracksTotal ? 'bg-green-500' : 'bg-blue-400')}`} style={{ width: libraryScanTracksTotal > 0 ? `${(libraryScanTracksAdded / libraryScanTracksTotal) * 100}%` : '0%' }}></div>
                                         </div>
                                     </div>
                                 )}
                             </div>
                         )}
 
-                        {availableCategories.length > 0 && !isCategoryScanLoading && (
+                        {availableLibraryGenres.length > 0 && !isLibraryScanLoading && (
                             <div className="mt-6 border-t border-gray-700 pt-4">
-                                <h3 className="text-lg font-semibold mb-2">Categories Found in your Consolidated Songs:</h3>
-                                <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto p-2 bg-gray-800 rounded-md">
-                                    {availableCategories.map(category => (
+                                <h3 className="text-lg font-semibold mb-2">Genres Found in your Consolidated Songs:</h3>
+                                <div className="flex flex-wrap gap-2 max-h-72 overflow-y-auto p-2 bg-gray-800 rounded-md">
+                                    {availableLibraryGenres.map(genre => (
                                         <button
-                                            key={category}
-                                            onClick={() => handleCategorySelect(category)}
-                                            disabled={!selectedCategories.includes(category) && selectedCategories.length >= 3}
-                                            className={`px-3 py-1 text-sm rounded-full transition-colors ${selectedCategories.includes(category) ? 'bg-blue-500 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'} ${!selectedCategories.includes(category) && selectedCategories.length >= 3 ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                            key={genre}
+                                            onClick={() => handleLibraryGenreSelect(genre)}
+                                            disabled={!selectedLibraryGenres.includes(genre) && selectedLibraryGenres.length >= 3}
+                                            className={`px-3 py-1 text-sm rounded-full transition-colors ${selectedLibraryGenres.includes(genre) ? 'bg-blue-500 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'} ${!selectedLibraryGenres.includes(genre) && selectedLibraryGenres.length >= 3 ? 'opacity-50 cursor-not-allowed' : ''}`}
                                         >
-                                            {category}
+                                            {genre}
                                         </button>
                                     ))}
                                 </div>
 
-                                {selectedCategories.length > 0 && (
+                                {selectedLibraryGenres.length > 0 && (
                                     <div className="mt-4">
-                                         <h3 className="text-lg font-semibold mb-2">Selected Categories for Mix (Songs must contain ALL selected):</h3>
-                                         <p className="text-gray-400 italic mb-4">{selectedCategories.join(' + ')}</p>
+                                         <h3 className="text-lg font-semibold mb-2">Selected Genres for Playlist (Songs must contain ALL selected):</h3>
+                                         <p className="text-gray-400 italic mb-4">{selectedLibraryGenres.join(' + ')}</p>
                                          <div>
                                             <label className="block mb-1 text-sm font-medium text-gray-300">Playlist Name</label>
-                                            <input type="text" value={categoryMixName} onChange={e => setCategoryMixName(e.target.value)} placeholder="My Consolidated Category Mix" className="w-full p-2 bg-gray-700 rounded-md border-gray-600" />
+                                            <input type="text" value={libraryFilterName} onChange={e => setLibraryFilterName(e.target.value)} placeholder="My Genre Filtered Playlist" className="w-full p-2 bg-gray-700 rounded-md border-gray-600" />
                                          </div>
                                          <button
-                                            onClick={handleCreateCategoryPlaylist}
-                                            disabled={isAnyCurationLoading || selectedCategories.length < 1 || selectedCategories.length > 3}
+                                            onClick={handleCreateLibraryFilterPlaylist}
+                                            disabled={isAnyCurationLoading || selectedLibraryGenres.length < 1 || selectedLibraryGenres.length > 3}
                                             className="mt-4 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
                                         >
-                                            {isCategoryScanLoading && (categoryScanPhase === 'filtering_tracks' || categoryScanPhase === 'creating_playlist' || categoryScanPhase === 'adding_tracks') ? 'Creating...' : 'Create Category Mix Playlist'}
+                                            {isLibraryScanLoading && (libraryScanPhase === 'filtering_tracks' || libraryScanPhase === 'creating_playlist' || libraryScanPhase === 'adding_tracks') ? 'Creating...' : 'Create Filtered Playlist'}
                                         </button>
-                                         {isCategoryScanLoading && (categoryScanPhase === 'filtering_tracks' || categoryScanPhase === 'creating_playlist' || categoryScanPhase === 'adding_tracks') && (
+                                         {isLibraryScanLoading && (libraryScanPhase === 'filtering_tracks' || libraryScanPhase === 'creating_playlist' || libraryScanPhase === 'adding_tracks') && (
                                             <button
-                                                onClick={handleCancelCategoryScan}
+                                                onClick={handleCancelLibraryScan}
                                                 className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
                                             >
                                                 Cancel
