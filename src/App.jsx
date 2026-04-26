@@ -166,7 +166,6 @@ export default function App() {
     const [showCreatorStatus, setShowCreatorStatus] = useState(false); // New state to control status visibility
     const [fadeCreatorStatusOut, setFadeCreatorStatusOut] = useState(false); // New state for fade effect
 
-
     const [isWqxrLoading, setIsWqxrLoading] = useState(false);
     const [wqxrProgress, setWqxrProgress] = useState(0);
     const [wqxrAbortController, setWqxrAbortController] = useState(null); // New AbortController state
@@ -176,15 +175,20 @@ export default function App() {
     const [aiPrompt, setAiPrompt] = useState("");
     const [customAbortController, setCustomAbortController] = useState(null); // New AbortController state
 
-
     const [isTopTracksLoading, setIsTopTracksLoading] = useState(false);
     const [topTracksProgress, setTopTracksProgress] = useState(0);
     const [topTracksAbortController, setTopTracksAbortController] = useState(null); // New AbortController state
 
-
     const [isAllSongsLoading, setIsAllSongsLoading] = useState(false);
     const [allSongsProgress, setAllSongsProgress] = useState(0);
     const [allSongsAbortController, setAllSongsAbortController] = useState(null); // New AbortController state
+    
+    // Detailed states for All Playlists progression
+    const [allSongsPhase, setAllSongsPhase] = useState('');
+    const [allSongsPlaylistsFound, setAllSongsPlaylistsFound] = useState(0);
+    const [allSongsPlaylistsProcessed, setAllSongsPlaylistsProcessed] = useState(0);
+    const [allSongsTotalToProcess, setAllSongsTotalToProcess] = useState(0);
+    const [allSongsTracksAdded, setAllSongsTracksAdded] = useState(0);
 
     const [isGenreFusionLoading, setIsGenreFusionLoading] = useState(false);
     const [genreFusionProgress, setGenreFusionProgress] = useState(0);
@@ -192,6 +196,9 @@ export default function App() {
     const [availableGenres, setAvailableGenres] = useState([]);
     const [selectedGenres, setSelectedGenres] = useState([]);
     const [genreFusionName, setGenreFusionName] = useState("");
+
+    // Helper function to introduce a delay (moved outside of component/hooks)
+    const delay = (ms) => new Promise(res => setTimeout(res, ms));
 
     const logout = useCallback(() => {
         setToken(null);
@@ -204,20 +211,37 @@ export default function App() {
         setSelectedPlaylistId(null);
     }, [player]);
     
+    // Robust central fetcher with integrated Rate Limiting handling
     const spotifyFetch = useCallback(async (endpoint, options = {}) => {
-        const response = await fetch(`https://api.spotify.com/v1${endpoint}`, {
-            ...options,
-            headers: {
-                ...options.headers,
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
-        });
-        if (response.status === 401) {
-            logout();
-            throw new Error("User is not authenticated");
+        const maxRetries = 3;
+        let retryCount = 0;
+        let currentDelay = 100;
+
+        while (retryCount <= maxRetries) {
+            const response = await fetch(`https://api.spotify.com/v1$${endpoint}`, {
+                ...options,
+                headers: {
+                    ...options.headers,
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+            });
+            if (response.status === 401) {
+                logout();
+                throw new Error("User is not authenticated");
+            }
+            if (response.status === 429) {
+                const retryAfter = response.headers.get('Retry-After');
+                const delayBeforeRetry = retryAfter ? parseInt(retryAfter, 10) * 1000 : currentDelay * 2;
+                console.warn(`Spotify API Rate Limit Hit (429). Retrying in ${delayBeforeRetry}ms...`);
+                await delay(delayBeforeRetry);
+                currentDelay = delayBeforeRetry;
+                retryCount++;
+                continue;
+            }
+            return response;
         }
-        return response;
+        throw new Error("Max retries reached for Spotify API");
     }, [token, logout]);
 
     // Effect to manage status message visibility (NO AUTO-HIDE)
@@ -247,16 +271,14 @@ export default function App() {
         setAiPrompt('');
     }, []);
 
-    // Helper function to introduce a delay (moved outside of component/hooks)
-    const delay = (ms) => new Promise(res => setTimeout(res, ms));
-
-
     // NEW: Custom hook for data fetching helpers
     const useSpotifyDataHelpers = (token) => {
-        // fetchUniqueTrackUisAndArtistIdsFromPlaylists is now directly defined here
-        const fetchUniqueTrackUisAndArtistIdsFromPlaylists = useCallback(async (signal) => {
+        // fetchUniqueTrackUisAndArtistIdsFromPlaylists updated for speed and tracking
+        const fetchUniqueTrackUisAndArtistIdsFromPlaylists = useCallback(async (signal, onProgress) => {
             let allPlaylists = [];
             let nextPlaylistsUrl = '/me/playlists?limit=50';
+
+            if (onProgress) onProgress({ phase: 'fetching_playlists', found: 0 });
 
             while (nextPlaylistsUrl) {
                 const response = await spotifyFetch(nextPlaylistsUrl, { signal });
@@ -266,6 +288,8 @@ export default function App() {
                 }
                 const data = await response.json();
                 allPlaylists = allPlaylists.concat(data.items);
+                
+                if (onProgress) onProgress({ phase: 'fetching_playlists', found: allPlaylists.length });
                 nextPlaylistsUrl = data.next ? data.next.replace('https://api.spotify.com/v1', '') : null;
                 await delay(50); // Add a small delay between playlist page fetches
             }
@@ -278,40 +302,50 @@ export default function App() {
             const uniqueArtistIds = new Set();
             let processedPlaylistsCount = 0;
 
-            for (const playlist of allPlaylists) {
-                let nextTracksUrl = playlist.tracks.href.replace('https://api.spotify.com/v1', '');
-                while (nextTracksUrl) {
-                    const response = await spotifyFetch(nextTracksUrl, { signal });
-                    
-                    if (!response.ok) {
-                        console.warn(`Failed to fetch tracks for playlist "${playlist.name}" (${playlist.id}): ${response.status}`);
-                        break;
+            if (onProgress) onProgress({ phase: 'fetching_tracks', processed: 0, total: allPlaylists.length });
+
+            // Concurrent chunking to fetch playlist tracks dramatically faster
+            const concurrency = 5; 
+            for (let i = 0; i < allPlaylists.length; i += concurrency) {
+                const chunk = allPlaylists.slice(i, i + concurrency);
+                
+                await Promise.all(chunk.map(async (playlist) => {
+                    let nextTracksUrl = playlist.tracks.href.replace('https://api.spotify.com/v1', '');
+                    while (nextTracksUrl) {
+                        const response = await spotifyFetch(nextTracksUrl, { signal });
+                        
+                        if (!response.ok) {
+                            console.warn(`Failed to fetch tracks for playlist "${playlist.name}" (${playlist.id}): ${response.status}`);
+                            break;
+                        }
+                        const data = await response.json();
+                        if (data.items) {
+                            data.items.forEach(item => {
+                                if (item.track && typeof item.track.uri === 'string' && item.track.uri.startsWith('spotify:track:')) {
+                                    uniqueTrackUris.add(item.track.uri);
+                                    item.track.artists.forEach(artist => uniqueArtistIds.add(artist.id));
+                                }
+                            });
+                        }
+                        nextTracksUrl = data.next ? data.next.replace('https://api.spotify.com/v1', '') : null;
                     }
-                    const data = await response.json();
-                    if (data.items) {
-                        data.items.forEach(item => {
-                            if (item.track && typeof item.track.uri === 'string' && item.track.uri.startsWith('spotify:track:')) {
-                                uniqueTrackUris.add(item.track.uri);
-                                item.track.artists.forEach(artist => uniqueArtistIds.add(artist.id));
-                            } else {
-                                console.warn(`Skipping invalid track URI from playlist "${playlist.name}":`, item.track);
-                            }
-                        });
-                    }
-                    nextTracksUrl = data.next ? data.next.replace('https://api.spotify.com/v1', '') : null;
-                    await delay(50); // Add a small delay between track page fetches for each playlist
-                }
-                processedPlaylistsCount++;
+                }));
+                
+                processedPlaylistsCount += chunk.length;
+                if (onProgress) onProgress({ 
+                    phase: 'fetching_tracks', 
+                    processed: Math.min(processedPlaylistsCount, allPlaylists.length), 
+                    total: allPlaylists.length 
+                });
             }
+            
             return { uniqueTrackUris: Array.from(uniqueTrackUris), uniqueArtistIds: Array.from(uniqueArtistIds) };
-        }, [token, spotifyFetch]); // Dependency on token ensures this helper updates if token changes
+        }, [spotifyFetch]);
 
         return { fetchUniqueTrackUisAndArtistIdsFromPlaylists };
     };
 
-    // Use the new hook at the top level of the App component
     const { fetchUniqueTrackUisAndArtistIdsFromPlaylists } = useSpotifyDataHelpers(token);
-
 
     const handleCreateWQXRPlaylist = useCallback(async () => {
         if(!profile) {
@@ -636,22 +670,44 @@ export default function App() {
         setCreatorError('');
         setCreatedPlaylist(null);
         setAllSongsProgress(0);
-        setCreatorStatus('Fetching all your playlists (0-15%)...');
+        
+        setCreatorStatus('Initializing library scan...');
+        setAllSongsPhase('fetching_playlists');
+        setAllSongsPlaylistsFound(0);
+        setAllSongsPlaylistsProcessed(0);
+        setAllSongsTotalToProcess(0);
+        setAllSongsTracksAdded(0);
 
         try {
-            // Using the helper function here
-            const { uniqueTrackUris } = await fetchUniqueTrackUisAndArtistIdsFromPlaylists(signal);
-            const trackUrisArray = uniqueTrackUris; // Already an array from helper
+            const { uniqueTrackUris } = await fetchUniqueTrackUisAndArtistIdsFromPlaylists(signal, (info) => {
+                if (info.phase === 'fetching_playlists') {
+                    setAllSongsPhase('fetching_playlists');
+                    setAllSongsPlaylistsFound(info.found);
+                    setCreatorStatus(`Scanning library (Found ${info.found} playlists)...`);
+                    setAllSongsProgress(5); 
+                } else if (info.phase === 'fetching_tracks') {
+                    setAllSongsPhase('fetching_tracks');
+                    setAllSongsPlaylistsProcessed(info.processed);
+                    setAllSongsPlaylistsFound(info.total);
+                    setCreatorStatus(`Extracting unique songs (${info.processed} / ${info.total} playlists processed)...`);
+                    setAllSongsProgress(10 + (info.processed / info.total) * 70); // Maps phase 2 to 10%-80%
+                }
+            });
+            
+            const trackUrisArray = uniqueTrackUris;
 
             if (trackUrisArray.length === 0) {
                 throw new Error('Could not find any unique songs across your playlists.');
             }
 
-            setAllSongsProgress(15); // After initial playlist and track fetching
-            const SPOTIFY_PLAYLIST_LIMIT = 10000; // Spotify's maximum playlist size
+            const SPOTIFY_PLAYLIST_LIMIT = 10000;
             const totalSongs = trackUrisArray.length;
             const numberOfPlaylists = Math.ceil(totalSongs / SPOTIFY_PLAYLIST_LIMIT);
             const createdPlaylistsInfo = [];
+            
+            setAllSongsPhase('creating_playlists');
+            setAllSongsTotalToProcess(totalSongs);
+            setAllSongsTracksAdded(0);
 
             for (let p = 0; p < numberOfPlaylists; p++) {
                 const startIdx = p * SPOTIFY_PLAYLIST_LIMIT;
@@ -661,43 +717,37 @@ export default function App() {
                 const playlistName = `All My Playlists Songs - Part ${p + 1} - ${new Date().toLocaleDateString()}`;
                 const description = `Part ${p + 1} of a playlist containing all unique songs from your Spotify playlists.`;
 
-                setCreatorStatus(`Creating playlist "${playlistName}" (${p + 1}/${numberOfPlaylists}) (15-${90 * (p + 1) / numberOfPlaylists}%)...`); // Dynamic status
+                setCreatorStatus(`Creating target playlist "${playlistName}" (${p + 1}/${numberOfPlaylists})...`);
                 const playlistResponse = await spotifyFetch(`/users/${profile.id}/playlists`, {
                     method: 'POST',
                     body: JSON.stringify({ name: playlistName, description: description, public: false }), signal
                 });
 
-                if (!playlistResponse.ok) {
-                    const errorBody = await playlistResponse.json();
-                    throw new Error(`Failed to create playlist "${playlistName}": ${playlistResponse.status} - ${errorBody.error?.message || 'Unknown error'}`);
-                }
                 const newPlaylist = await playlistResponse.json();
                 createdPlaylistsInfo.push(newPlaylist);
 
-                setCreatorStatus(`Adding ${currentChunkOfTracks.length} songs to "${newPlaylist.name}" (part ${p + 1}) (Up to ${90 * (p + 1) / numberOfPlaylists}%)...`); // Dynamic status
                 const chunkSizeForAdding = 100;
                 for (let i = 0; i < currentChunkOfTracks.length; i += chunkSizeForAdding) {
                     const chunk = currentChunkOfTracks.slice(i, i + chunkSizeForAdding);
-                    const addTracksResponse = await spotifyFetch(`/playlists/${newPlaylist.id}/tracks`, {
+                    
+                    await spotifyFetch(`/playlists/${newPlaylist.id}/tracks`, {
                         method: 'POST',
                         body: JSON.stringify({ uris: chunk }), signal
                     });
 
-                    if (!addTracksResponse.ok) {
-                        const errorBody = await addTracksResponse.json();
-                        console.error(`Error adding tracks chunk to playlist ${newPlaylist.name}:`, errorBody);
-                        throw new Error(`Failed to add tracks to playlist "${newPlaylist.name}": ${addTracksResponse.status} - ${errorBody.error?.message || 'Unknown error'}`);
-                    }
-                    // Calculate overall progress more accurately across all parts
+                    // Update UI steps for addition
+                    setAllSongsTracksAdded(prev => prev + chunk.length);
                     const currentOverallProgress = (startIdx + i + chunk.length);
-                    setAllSongsProgress((currentOverallProgress / totalSongs) * 90 + 10); // Scale 0-90% for adding, leaving 10% for finalization
-                    await delay(50); // Delay for adding tracks
+                    setAllSongsProgress(80 + (currentOverallProgress / totalSongs) * 20); // Maps phase 3 to 80%-100%
+                    
+                    setCreatorStatus(`Adding ${chunk.length} songs to "${newPlaylist.name}"...`);
+                    await delay(50);
                 }
             }
             
-            setAllSongsProgress(100); // Final progress update
+            setAllSongsProgress(100);
             setCreatedPlaylist(createdPlaylistsInfo[0]);
-            setCreatorStatus(`Successfully created ${numberOfPlaylists} playlist(s)!`);
+            setCreatorStatus(`Successfully processed library! Created ${numberOfPlaylists} playlist(s) from ${totalSongs} unique songs.`);
             localStorage.removeItem('/me/playlists?limit=50');
             setLibraryVersion(v => v + 1);
 
@@ -711,7 +761,12 @@ export default function App() {
         } finally {
             setIsAllSongsLoading(false);
             setAllSongsProgress(0);
-            setAllSongsAbortController(null); // Clear controller reference
+            setAllSongsAbortController(null); 
+            setAllSongsPhase('');
+            setAllSongsPlaylistsFound(0);
+            setAllSongsPlaylistsProcessed(0);
+            setAllSongsTotalToProcess(0);
+            setAllSongsTracksAdded(0);
         }
     }, [profile, token, setLibraryVersion, fetchUniqueTrackUisAndArtistIdsFromPlaylists, spotifyFetch]);
 
@@ -1041,6 +1096,7 @@ export default function App() {
             isCustomLoading, customPlaylistName, setCustomPlaylistName, aiPrompt, setAiPrompt, handleCreateAiPlaylist, handleCancelAiPlaylist, resetCustomForm,
             isTopTracksLoading, topTracksProgress, handleCreateTopTracksPlaylist, handleCancelTopTracksPlaylist,
             isAllSongsLoading, allSongsProgress, handleCreateAllSongsPlaylist, handleCancelAllSongsPlaylist,
+            allSongsPhase, allSongsPlaylistsFound, allSongsPlaylistsProcessed, allSongsTotalToProcess, allSongsTracksAdded, // Exposing detailed states
             isGenreFusionLoading, genreFusionProgress, handleFetchAvailableGenres, handleCreateGenreFusionPlaylist, handleCancelGenreFusion, availableGenres, selectedGenres, setSelectedGenres, genreFusionName, setGenreFusionName,
             getYesterdayDateParts, // Pass getYesterdayDateParts to context
             spotifyFetch
@@ -1286,7 +1342,7 @@ function PlayerBar() {
 
 // --- API Fetch Hook ---
 // A custom hook to simplify making authenticated requests to the Spotify API.
-const useSpotifyApi = (url, deps = []) => { // Add deps array
+const useSpotifyApi = (url, deps = []) => { 
     const { spotifyFetch } = useContext(AppContext);
     const [data, setData] = useState(null);
     const [error, setError] = useState(null);
@@ -1311,10 +1367,10 @@ const useSpotifyApi = (url, deps = []) => { // Add deps array
                         if (isMounted) {
                             setData(storedData);
                             setLoading(false);
-                            return; // Return from cache, no API call needed
+                            return; 
                         }
                     } else {
-                        localStorage.removeItem(url); // Clear expired cache
+                        localStorage.removeItem(url); 
                     }
                 }
             } catch (cacheError) {
@@ -1322,13 +1378,14 @@ const useSpotifyApi = (url, deps = []) => { // Add deps array
             }
             // --- End Cache Read Attempt ---
 
+
             if (isMounted) setLoading(true);
 
             try {
                 const response = await spotifyFetch(url);
-                if (!response.ok) {
+                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
-                }
+                 }
                 const result = await response.json();
                 
                 // --- Cache Write Attempt ---
@@ -1359,7 +1416,7 @@ const useSpotifyApi = (url, deps = []) => { // Add deps array
         return () => {
             isMounted = false;
         };
-    }, [spotifyFetch, url, ...deps]); // Use spread operator for deps
+    }, [url, spotifyFetch, ...deps]); 
     return { data, error, loading };
 };
 
@@ -1553,6 +1610,7 @@ function PlaylistCreator() {
         isCustomLoading, customPlaylistName, setCustomPlaylistName, aiPrompt, setAiPrompt, handleCreateAiPlaylist, handleCancelAiPlaylist,
         isTopTracksLoading, topTracksProgress, handleCreateTopTracksPlaylist, handleCancelTopTracksPlaylist,
         isAllSongsLoading, allSongsProgress, handleCreateAllSongsPlaylist, handleCancelAllSongsPlaylist,
+        allSongsPhase, allSongsPlaylistsFound, allSongsPlaylistsProcessed, allSongsTotalToProcess, allSongsTracksAdded,
         isGenreFusionLoading, genreFusionProgress, handleFetchAvailableGenres, handleCreateGenreFusionPlaylist, handleCancelGenreFusion, availableGenres, selectedGenres, setSelectedGenres, genreFusionName, setGenreFusionName,
         getYesterdayDateParts,
         showCreatorStatus, setShowCreatorStatus, fadeCreatorStatusOut
@@ -1745,12 +1803,49 @@ function PlaylistCreator() {
                             Cancel
                         </button>
                     )}
+                    
                     {isAllSongsLoading && (
-                        <div className="mt-4">
-                            <div className="w-full bg-gray-600 rounded-full h-2.5">
-                                <div className="bg-orange-500 h-2.5 rounded-full" style={{ width: `${allSongsProgress}%` }}></div>
+                        <div className="mt-4 bg-gray-900 p-4 rounded-md space-y-4">
+                            <div>
+                                <div className="flex justify-between text-xs text-gray-400 mb-1">
+                                    <span>Overall Progress</span>
+                                    <span>{Math.round(allSongsProgress)}%</span>
+                                </div>
+                                <div className="w-full bg-gray-700 rounded-full h-2">
+                                    <div className="bg-orange-500 h-2 rounded-full transition-all duration-300" style={{ width: `${allSongsProgress}%` }}></div>
+                                </div>
                             </div>
-                            <p className="text-center text-sm text-gray-300 mt-1">{Math.round(allSongsProgress)}%</p>
+
+                            <div>
+                                <p className="text-xs text-gray-400 mb-1">
+                                    Step 1: Finding Playlists ({allSongsPlaylistsFound} found)
+                                </p>
+                                <div className="w-full bg-gray-700 rounded-full h-1.5">
+                                    <div className={`h-1.5 rounded-full transition-all duration-300 ${allSongsPhase === 'fetching_playlists' ? 'bg-orange-400 animate-pulse w-full' : (allSongsPlaylistsFound > 0 ? 'bg-green-500 w-full' : 'w-0')}`}></div>
+                                </div>
+                            </div>
+
+                            {(allSongsPhase === 'fetching_tracks' || allSongsPhase === 'creating_playlists') && (
+                                <div>
+                                    <p className="text-xs text-gray-400 mb-1">
+                                        Step 2: Extracting Songs ({allSongsPlaylistsProcessed} / {allSongsPlaylistsFound} playlists processed)
+                                    </p>
+                                    <div className="w-full bg-gray-700 rounded-full h-1.5">
+                                        <div className={`h-1.5 rounded-full transition-all duration-300 ${allSongsPhase === 'creating_playlists' ? 'bg-green-500' : 'bg-orange-400'}`} style={{ width: `${(allSongsPlaylistsProcessed / Math.max(1, allSongsPlaylistsFound)) * 100}%` }}></div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {allSongsPhase === 'creating_playlists' && (
+                                <div>
+                                    <p className="text-xs text-gray-400 mb-1">
+                                        Step 3: Populating Final Playlist ({allSongsTracksAdded} / {allSongsTotalToProcess} songs added)
+                                    </p>
+                                    <div className="w-full bg-gray-700 rounded-full h-1.5">
+                                        <div className="bg-orange-400 h-1.5 rounded-full transition-all duration-300" style={{ width: `${(allSongsTracksAdded / Math.max(1, allSongsTotalToProcess)) * 100}%` }}></div>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
