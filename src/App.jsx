@@ -143,16 +143,27 @@ export default function App() {
     const [isTopTracksLoading, setIsTopTracksLoading] = useState(false);
     const [topTracksProgress, setTopTracksProgress] = useState(0);
     const [topTracksAbortController, setTopTracksAbortController] = useState(null);
+    const [topTracksTimeRange, setTopTracksTimeRange] = useState(null);
 
-    const [isAllSongsLoading, setIsAllSongsLoading] = useState(false);
-    const [allSongsProgress, setAllSongsProgress] = useState(0);
-    const [allSongsAbortController, setAllSongsAbortController] = useState(null);
-    
-    const [allSongsPhase, setAllSongsPhase] = useState('');
-    const [allSongsPlaylistsFound, setAllSongsPlaylistsFound] = useState(0);
-    const [allSongsPlaylistsProcessed, setAllSongsPlaylistsProcessed] = useState(0);
-    const [allSongsTotalToProcess, setAllSongsTotalToProcess] = useState(0);
-    const [allSongsTracksAdded, setAllSongsTracksAdded] = useState(0);
+    // --- CONSOLIDATION STATES ---
+    const [isConsolidateLoading, setIsConsolidateLoading] = useState(false);
+    const [consolidateProgress, setConsolidateProgress] = useState(0);
+    const [consolidateAbortController, setConsolidateAbortController] = useState(null);
+    const [consolidatePhase, setConsolidatePhase] = useState('');
+    const [consolidatePlaylistsFound, setConsolidatePlaylistsFound] = useState(0);
+    const [consolidatePlaylistsProcessed, setConsolidatePlaylistsProcessed] = useState(0);
+    const [consolidateTotalToProcess, setConsolidateTotalToProcess] = useState(0);
+    const [consolidateTracksAdded, setConsolidateTracksAdded] = useState(0);
+
+    // --- CATEGORY MIX STATES ---
+    const [isCategoryScanLoading, setIsCategoryScanLoading] = useState(false);
+    const [categoryScanProgress, setCategoryScanProgress] = useState(0);
+    const [categoryScanPhase, setCategoryScanPhase] = useState('');
+    const [categoryScanAbortController, setCategoryScanAbortController] = useState(null);
+    const [availableCategories, setAvailableCategories] = useState([]);
+    const [selectedCategories, setSelectedCategories] = useState([]);
+    const [categoryMixName, setCategoryMixName] = useState("");
+    const [categoryFilterData, setCategoryFilterData] = useState(null);
 
     const [isGenreFusionLoading, setIsGenreFusionLoading] = useState(false);
     const [genreFusionProgress, setGenreFusionProgress] = useState(0);
@@ -160,6 +171,7 @@ export default function App() {
     const [availableGenres, setAvailableGenres] = useState([]);
     const [selectedGenres, setSelectedGenres] = useState([]);
     const [genreFusionName, setGenreFusionName] = useState("");
+
 
     const logout = useCallback(() => {
         setToken(null);
@@ -172,14 +184,12 @@ export default function App() {
         setSelectedPlaylistId(null);
     }, [player]);
     
-    // FIXED: Smart Headers for spotifyFetch
     const spotifyFetch = useCallback(async (endpoint, options = {}) => {
         const maxRetries = 3;
         let retryCount = 0;
         let currentDelay = 100;
 
         while (retryCount <= maxRetries) {
-            // Determine if we are sending data (POST, PUT, PATCH)
             const isBodyRequest = options.method && ['POST', 'PUT', 'PATCH'].includes(options.method.toUpperCase());
             
             const headers = {
@@ -187,7 +197,6 @@ export default function App() {
                 ...options.headers,
             };
 
-            // ONLY add Content-Type if we are sending a body. Spotify rejects GETs with Content-Type.
             if (isBodyRequest) {
                 headers['Content-Type'] = 'application/json';
             }
@@ -255,7 +264,12 @@ export default function App() {
                     throw new Error(`Failed to fetch playlists: ${response.status}`);
                 }
                 const data = await response.json();
-                allPlaylists = allPlaylists.concat(data.items);
+                
+                const filteredPlaylists = data.items.filter(playlist => 
+                    playlist && playlist.name && !playlist.name.toLowerCase().includes('all my playlists songs')
+                );
+                
+                allPlaylists = allPlaylists.concat(filteredPlaylists);
                 
                 if (onProgress) onProgress({ phase: 'fetching_playlists', found: allPlaylists.length });
                 nextPlaylistsUrl = data.next ? data.next.replace('https://api.spotify.com/v1', '') : null;
@@ -263,7 +277,7 @@ export default function App() {
             }
 
             if (allPlaylists.length === 0) {
-                throw new Error('You have no playlists in your Spotify library.');
+                throw new Error('You have no valid playlists in your Spotify library to process.');
             }
             
             const uniqueTrackUris = new Set();
@@ -548,6 +562,11 @@ export default function App() {
             setCreatorError('Could not get user profile. Please try again.');
             return;
         }
+        if (!topTracksTimeRange) {
+            setCreatorError('Please select a time range for your top tracks.');
+            return;
+        }
+
         const controller = new AbortController();
         setTopTracksAbortController(controller);
         const signal = controller.signal;
@@ -559,7 +578,7 @@ export default function App() {
 
         try {
             const fetchTopTracksPage = async (offset) => {
-                const response = await spotifyFetch(`/me/top/tracks?limit=50&offset=${offset}&time_range=long_term`, { signal });
+                const response = await spotifyFetch(`/me/top/tracks?limit=50&offset=${offset}&time_range=${topTracksTimeRange}`, { signal });
                 if (!response.ok) {
                     throw new Error(`Failed to fetch top tracks page (offset ${offset}): ${response.status}`);
                 }
@@ -585,12 +604,15 @@ export default function App() {
             const trackUris = topTracks.map(track => track.uri);
             setTopTracksProgress(60);
 
+            let timeLabel = '1 Year';
+            if (topTracksTimeRange === 'short_term') timeLabel = '4 Weeks';
+            if (topTracksTimeRange === 'medium_term') timeLabel = '6 Months';
 
             setCreatorStatus(`Found ${trackUris.length} top tracks. Creating playlist...`);
-            const playlistName = `My Top 100 Tracks - ${new Date().toLocaleDateString()}`;
+            const playlistName = `My Top 100 Tracks (${timeLabel}) - ${new Date().toLocaleDateString()}`;
             const playlistResponse = await spotifyFetch(`/users/${profile.id}/playlists`, {
                 method: 'POST',
-                body: JSON.stringify({ name: playlistName, description: 'A playlist generated from your top 100 Spotify tracks.', public: false }), signal
+                body: JSON.stringify({ name: playlistName, description: `A playlist generated from your top 100 Spotify tracks (${timeLabel}).`, public: false }), signal
             });
             setTopTracksProgress(75);
             const newPlaylist = await playlistResponse.json();
@@ -618,47 +640,50 @@ export default function App() {
             setTopTracksProgress(0);
             setTopTracksAbortController(null); 
         }
-    }, [profile, token, setLibraryVersion, spotifyFetch]);
+    }, [profile, token, setLibraryVersion, spotifyFetch, topTracksTimeRange]);
 
     const handleCancelTopTracksPlaylist = useCallback(() => {
         topTracksAbortController?.abort();
     }, [topTracksAbortController]);
 
 
-    const handleCreateAllSongsPlaylist = useCallback(async () => {
+    // --- CONSOLIDATION & CATEGORY LOGIC ---
+    
+    const handleConsolidatePlaylists = useCallback(async () => {
         if (!profile) {
             setCreatorError('Could not get user profile. Please try again.');
             return;
         }
         const controller = new AbortController();
-        setAllSongsAbortController(controller);
+        setConsolidateAbortController(controller);
         const signal = controller.signal;
 
-        setIsAllSongsLoading(true);
+        setIsConsolidateLoading(true);
         setCreatorError('');
         setCreatedPlaylist(null);
-        setAllSongsProgress(0);
+        setConsolidateProgress(0);
         
         setCreatorStatus('Initializing library scan...');
-        setAllSongsPhase('fetching_playlists');
-        setAllSongsPlaylistsFound(0);
-        setAllSongsPlaylistsProcessed(0);
-        setAllSongsTotalToProcess(0);
-        setAllSongsTracksAdded(0);
+        setConsolidatePhase('fetching_playlists');
+        setConsolidatePlaylistsFound(0);
+        setConsolidatePlaylistsProcessed(0);
+        setConsolidateTotalToProcess(0);
+        setConsolidateTracksAdded(0);
 
         try {
+            // Scan all playlists EXCLUDING "All My Playlists Songs"
             const { uniqueTrackUris } = await fetchUniqueTrackUisAndArtistIdsFromPlaylists(signal, (info) => {
                 if (info.phase === 'fetching_playlists') {
-                    setAllSongsPhase('fetching_playlists');
-                    setAllSongsPlaylistsFound(info.found);
+                    setConsolidatePhase('fetching_playlists');
+                    setConsolidatePlaylistsFound(info.found);
                     setCreatorStatus(`Scanning library (Found ${info.found} playlists)...`);
-                    setAllSongsProgress(5); 
+                    setConsolidateProgress(5); 
                 } else if (info.phase === 'fetching_tracks') {
-                    setAllSongsPhase('fetching_tracks');
-                    setAllSongsPlaylistsProcessed(info.processed);
-                    setAllSongsPlaylistsFound(info.total);
+                    setConsolidatePhase('fetching_tracks');
+                    setConsolidatePlaylistsProcessed(info.processed);
+                    setConsolidatePlaylistsFound(info.total);
                     setCreatorStatus(`Extracting unique songs (${info.processed} / ${info.total} playlists processed)...`);
-                    setAllSongsProgress(10 + (info.processed / info.total) * 70); 
+                    setConsolidateProgress(10 + (info.processed / info.total) * 70); 
                 }
             });
             
@@ -673,9 +698,9 @@ export default function App() {
             const numberOfPlaylists = Math.ceil(totalSongs / SPOTIFY_PLAYLIST_LIMIT);
             const createdPlaylistsInfo = [];
             
-            setAllSongsPhase('creating_playlists');
-            setAllSongsTotalToProcess(totalSongs);
-            setAllSongsTracksAdded(0);
+            setConsolidatePhase('creating_playlists');
+            setConsolidateTotalToProcess(totalSongs);
+            setConsolidateTracksAdded(0);
 
             for (let p = 0; p < numberOfPlaylists; p++) {
                 const startIdx = p * SPOTIFY_PLAYLIST_LIMIT;
@@ -683,7 +708,7 @@ export default function App() {
                 const currentChunkOfTracks = trackUrisArray.slice(startIdx, endIdx);
                 
                 const playlistName = `All My Playlists Songs - Part ${p + 1} - ${new Date().toLocaleDateString()}`;
-                const description = `Part ${p + 1} of a playlist containing all unique songs from your Spotify playlists.`;
+                const description = `Part ${p + 1} of a consolidated playlist containing all unique songs from your library.`;
 
                 setCreatorStatus(`Creating target playlist "${playlistName}" (${p + 1}/${numberOfPlaylists})...`);
                 const playlistResponse = await spotifyFetch(`/users/${profile.id}/playlists`, {
@@ -703,43 +728,318 @@ export default function App() {
                         body: JSON.stringify({ uris: chunk }), signal
                     });
 
-                    setAllSongsTracksAdded(prev => prev + chunk.length);
+                    setConsolidateTracksAdded(prev => prev + chunk.length);
                     const currentOverallProgress = (startIdx + i + chunk.length);
-                    setAllSongsProgress(80 + (currentOverallProgress / totalSongs) * 20); 
+                    setConsolidateProgress(80 + (currentOverallProgress / totalSongs) * 20); 
                     
                     setCreatorStatus(`Adding ${chunk.length} songs to "${newPlaylist.name}"...`);
                     await delay(50);
                 }
             }
             
-            setAllSongsProgress(100);
+            setConsolidateProgress(100);
             setCreatedPlaylist(createdPlaylistsInfo[0]);
-            setCreatorStatus(`Successfully processed library! Created ${numberOfPlaylists} playlist(s) from ${totalSongs} unique songs.`);
+            setCreatorStatus(`Successfully consolidated library! Created ${numberOfPlaylists} playlist(s) from ${totalSongs} unique songs.`);
             localStorage.removeItem('/me/playlists?limit=50');
             setLibraryVersion(v => v + 1);
 
         } catch (e) {
             if (e.name === 'AbortError') {
-                setCreatorStatus('All songs playlist creation cancelled.');
+                setCreatorStatus('Consolidation cancelled.');
             } else {
                 setCreatorError(e.message);
             }
-            console.error("Error creating all songs from playlists:", e);
+            console.error("Error creating consolidated playlist:", e);
         } finally {
-            setIsAllSongsLoading(false);
-            setAllSongsProgress(0);
-            setAllSongsAbortController(null); 
-            setAllSongsPhase('');
-            setAllSongsPlaylistsFound(0);
-            setAllSongsPlaylistsProcessed(0);
-            setAllSongsTotalToProcess(0);
-            setAllSongsTracksAdded(0);
+            setIsConsolidateLoading(false);
+            setConsolidateProgress(0);
+            setConsolidateAbortController(null); 
+            setConsolidatePhase('');
         }
     }, [profile, token, setLibraryVersion, fetchUniqueTrackUisAndArtistIdsFromPlaylists, spotifyFetch]);
 
-    const handleCancelAllSongsPlaylist = useCallback(() => {
-        allSongsAbortController?.abort();
-    }, [allSongsAbortController]);
+    const handleCancelConsolidate = useCallback(() => {
+        consolidateAbortController?.abort();
+    }, [consolidateAbortController]);
+
+    const handleScanConsolidatedForCategories = useCallback(async () => {
+        if (!profile) {
+            setCreatorError('Could not get user profile. Please try again.');
+            return;
+        }
+        const controller = new AbortController();
+        setCategoryScanAbortController(controller);
+        const signal = controller.signal;
+
+        setIsCategoryScanLoading(true);
+        setCreatorError('');
+        setAvailableCategories([]);
+        setCategoryScanProgress(0);
+        setCategoryScanPhase('fetching_playlists');
+        setCreatorStatus('Looking for your consolidated playlists...');
+
+        try {
+            // 1. Find all "All My Playlists Songs"
+            let allPlaylists = [];
+            let nextPlaylistsUrl = '/me/playlists?limit=50';
+            while (nextPlaylistsUrl) {
+                const response = await spotifyFetch(nextPlaylistsUrl, { signal });
+                const data = await response.json();
+                allPlaylists = allPlaylists.concat(data.items);
+                nextPlaylistsUrl = data.next ? data.next.replace('https://api.spotify.com/v1', '') : null;
+            }
+
+            const consolidatedPlaylists = allPlaylists.filter(p => p && p.name && p.name.toLowerCase().includes('all my playlists songs'));
+
+            if (consolidatedPlaylists.length === 0) {
+                throw new Error("No consolidated playlists found. Please run Step 1 'Consolidate All Playlists' first.");
+            }
+
+            // Group by date and find the most recent batch
+            let latestTimestamp = 0;
+            let latestDateStr = '';
+
+            consolidatedPlaylists.forEach(p => {
+                const parts = p.name.split('-');
+                if (parts.length >= 3) {
+                    const dateStr = parts[parts.length - 1].trim();
+                    const dateObj = new Date(dateStr);
+                    if (!isNaN(dateObj.getTime()) && dateObj.getTime() > latestTimestamp) {
+                        latestTimestamp = dateObj.getTime();
+                        latestDateStr = dateStr;
+                    }
+                }
+            });
+
+            let playlistsToScan = consolidatedPlaylists;
+            if (latestDateStr) {
+                playlistsToScan = consolidatedPlaylists.filter(p => p.name.includes(latestDateStr));
+                
+                // Warn if the playlist is very old
+                const daysOld = (Date.now() - latestTimestamp) / (1000 * 60 * 60 * 24);
+                if (daysOld > 30) {
+                    throw new Error(`Your most recent consolidated playlists are from ${latestDateStr} (over a month ago). Please run Step 1 again to generate an up-to-date consolidation!`);
+                }
+            }
+
+            setCategoryScanPhase('fetching_tracks');
+            setCreatorStatus(`Found ${playlistsToScan.length} recent consolidated playlist(s). Extracting songs...`);
+            setCategoryScanProgress(10);
+
+            // 2. Fetch tracks from only those playlists
+            const trackDetailsMap = new Map();
+            const uniqueArtistIds = new Set();
+            let processedCount = 0;
+
+            for (const playlist of playlistsToScan) {
+                let nextTracksUrl = playlist.tracks.href.replace('https://api.spotify.com/v1', '');
+                while (nextTracksUrl) {
+                    const response = await spotifyFetch(nextTracksUrl, { signal });
+                    const data = await response.json();
+                    if (data.items) {
+                        data.items.forEach(item => {
+                            if (item.track && item.track.uri) {
+                                if (!trackDetailsMap.has(item.track.uri)) {
+                                    trackDetailsMap.set(item.track.uri, new Set());
+                                }
+                                item.track.artists.forEach(artist => {
+                                    uniqueArtistIds.add(artist.id);
+                                    trackDetailsMap.get(item.track.uri).add(artist.id);
+                                });
+                            }
+                        });
+                    }
+                    nextTracksUrl = data.next ? data.next.replace('https://api.spotify.com/v1', '') : null;
+                }
+                processedCount++;
+                setCategoryScanProgress(10 + (processedCount / playlistsToScan.length) * 30); // 10% to 40%
+            }
+
+            const artistIdsArray = Array.from(uniqueArtistIds);
+            if (artistIdsArray.length === 0) {
+                throw new Error('Could not find any artists in your consolidated playlists.');
+            }
+            
+            setCategoryScanPhase('fetching_genres');
+            setCreatorStatus(`Found ${artistIdsArray.length} unique artists. Fetching specific genres...`);
+            
+            // 3. Fetch Artist Genres
+            const artistToGenres = new Map();
+            const batchSize = 50;
+            for (let i = 0; i < artistIdsArray.length; i += batchSize) {
+                const batch = artistIdsArray.slice(i, i + batchSize);
+                const response = await spotifyFetch(`/artists?ids=${batch.join(',')}`, { signal });
+                if (response.ok) {
+                    const data = await response.json();
+                    data.artists.forEach(artist => {
+                        if(artist && artist.genres) {
+                             artistToGenres.set(artist.id, artist.genres);
+                        }
+                    });
+                }
+                setCategoryScanProgress(40 + ((i + batch.length) / artistIdsArray.length) * 40); // 40% to 80%
+                await delay(50);
+            }
+
+            // 4. Fetch Spotify's broad Categories
+            setCategoryScanPhase('mapping_categories');
+            setCreatorStatus('Fetching Spotify broad categories and cross-referencing...');
+            const categoriesResponse = await spotifyFetch(`/browse/categories?limit=50`, { signal });
+            if (!categoriesResponse.ok) throw new Error("Failed to fetch categories from Spotify");
+            const categoriesData = await categoriesResponse.json();
+            
+            const allCategories = categoriesData.categories.items.map(c => c.name);
+
+            // 5. Map artists to broad categories
+            const artistToBroadCategories = new Map();
+            const foundBroadCategories = new Set();
+
+            artistToGenres.forEach((genres, artistId) => {
+                const matchedCats = new Set();
+                genres.forEach(genre => {
+                    const normG = genre.toLowerCase().replace(/[^a-z0-9]/g, '');
+                    allCategories.forEach(cat => {
+                        const normCat = cat.toLowerCase().replace(/[^a-z0-9]/g, '');
+                        if (normG.includes(normCat) || normCat.includes(normG)) {
+                            matchedCats.add(cat);
+                            foundBroadCategories.add(cat);
+                        }
+                    });
+                });
+                artistToBroadCategories.set(artistId, Array.from(matchedCats));
+            });
+
+            const trackDetails = Array.from(trackDetailsMap.entries()).map(([uri, artistsSet]) => ({
+                uri,
+                artistIds: Array.from(artistsSet)
+            }));
+
+            setCategoryFilterData({
+                tracks: trackDetails,
+                artistMap: artistToBroadCategories
+            });
+            
+            setAvailableCategories(Array.from(foundBroadCategories).sort());
+            setCategoryScanProgress(100);
+            setCreatorStatus(`Scan complete! Found ${foundBroadCategories.size} broad categories matching your consolidated library. Select up to 3.`);
+
+        } catch (e) {
+            if (e.name === 'AbortError') {
+                setCreatorStatus('Category scan cancelled.');
+            } else {
+                setCreatorError(e.message);
+            }
+            console.error("Error scanning library for categories:", e);
+        } finally {
+            setIsCategoryScanLoading(false);
+            setCategoryScanProgress(0);
+            setCategoryScanPhase('');
+        }
+    }, [profile, spotifyFetch]);
+
+    const handleCreateCategoryPlaylist = useCallback(async () => {
+        if (selectedCategories.length < 1 || selectedCategories.length > 3) {
+            setCreatorError("Please select between 1 and 3 broad categories.");
+            return;
+        }
+        if (!categoryMixName.trim()) {
+            setCreatorError("Please enter a name for your category playlist.");
+            return;
+        }
+        if (!categoryFilterData) {
+            setCreatorError("Library data is missing. Please scan your consolidated songs again.");
+            return;
+        }
+    
+        const controller = new AbortController();
+        setCategoryScanAbortController(controller);
+        const signal = controller.signal;
+    
+        setIsCategoryScanLoading(true);
+        setCreatorError('');
+        setCategoryScanPhase('filtering_tracks');
+        setCreatorStatus('Filtering your consolidated library to find matching songs...');
+    
+        try {
+            // Filter local tracks based on selected broad categories
+            const matchedTrackUris = new Set();
+
+            categoryFilterData.tracks.forEach(track => {
+                const matches = track.artistIds.some(artistId => {
+                    const artistCats = categoryFilterData.artistMap.get(artistId) || [];
+                    return artistCats.some(cat => selectedCategories.includes(cat));
+                });
+                if (matches) {
+                    matchedTrackUris.add(track.uri);
+                }
+            });
+
+            const finalTrackUris = Array.from(matchedTrackUris);
+
+            if(finalTrackUris.length === 0) {
+                throw new Error("No songs found in your library matching those specific categories.");
+            }
+            
+            setCategoryScanPhase('creating_playlist');
+            setCreatorStatus(`Found ${finalTrackUris.length} matching songs. Creating playlist "${categoryMixName}"...`);
+            
+            const playlistResponse = await spotifyFetch(`/users/${profile.id}/playlists`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    name: categoryMixName,
+                    description: `A collection of songs from your consolidated library matching: ${selectedCategories.join(', ')}.`,
+                    public: false
+                }),
+                signal
+            });
+            const newPlaylist = await playlistResponse.json();
+    
+            setCategoryScanPhase('adding_tracks');
+            const chunkSize = 100;
+            
+            for (let i = 0; i < finalTrackUris.length; i += chunkSize) {
+                const chunk = finalTrackUris.slice(i, i + chunkSize);
+                await spotifyFetch(`/playlists/${newPlaylist.id}/tracks`, {
+                    method: 'POST',
+                    body: JSON.stringify({ uris: chunk }),
+                    signal
+                });
+                
+                setCategoryScanProgress(((i + chunk.length) / finalTrackUris.length) * 100);
+                setCreatorStatus(`Adding songs to playlist (${Math.floor((i + chunk.length) / finalTrackUris.length * 100)}%)...`);
+                await delay(100);
+            }
+    
+            setCreatedPlaylist(newPlaylist);
+            setCreatorStatus("Category playlist created successfully!");
+            localStorage.removeItem('/me/playlists?limit=50');
+            setLibraryVersion(v => v + 1);
+            setSelectedCategories([]);
+            setCategoryMixName("");
+            
+            // Clear local mapping data after successful creation
+            setCategoryFilterData(null);
+            setAvailableCategories([]);
+    
+        } catch (e) {
+            if (e.name === 'AbortError') {
+                setCreatorStatus("Category playlist creation cancelled.");
+            } else {
+                setCreatorError(e.message);
+            }
+            console.error("Error creating category playlist:", e);
+        } finally {
+            setIsCategoryScanLoading(false);
+            setCategoryScanAbortController(null);
+            setCategoryScanProgress(0);
+            setCategoryScanPhase('');
+        }
+    }, [profile, spotifyFetch, selectedCategories, categoryMixName, categoryFilterData, setLibraryVersion]);
+
+    const handleCancelCategoryScan = useCallback(() => {
+        categoryScanAbortController?.abort();
+    }, [categoryScanAbortController]);
+
 
     const handleFetchAvailableGenres = useCallback(async () => {
         if (!profile) {
@@ -1061,10 +1361,11 @@ export default function App() {
             creatorStatus, creatorError, createdPlaylist, showCreatorStatus, setShowCreatorStatus, fadeCreatorStatusOut,
             isWqxrLoading, wqxrProgress, handleCreateWQXRPlaylist, handleCancelWQXRPlaylist,
             isCustomLoading, customPlaylistName, setCustomPlaylistName, aiPrompt, setAiPrompt, handleCreateAiPlaylist, handleCancelAiPlaylist, resetCustomForm,
-            isTopTracksLoading, topTracksProgress, handleCreateTopTracksPlaylist, handleCancelTopTracksPlaylist,
-            isAllSongsLoading, allSongsProgress, handleCreateAllSongsPlaylist, handleCancelAllSongsPlaylist,
-            allSongsPhase, allSongsPlaylistsFound, allSongsPlaylistsProcessed, allSongsTotalToProcess, allSongsTracksAdded,
+            isTopTracksLoading, topTracksProgress, handleCreateTopTracksPlaylist, handleCancelTopTracksPlaylist, topTracksTimeRange, setTopTracksTimeRange,
+            isConsolidateLoading, consolidateProgress, handleConsolidatePlaylists, handleCancelConsolidate,
+            consolidatePhase, consolidatePlaylistsFound, consolidatePlaylistsProcessed, consolidateTotalToProcess, consolidateTracksAdded,
             isGenreFusionLoading, genreFusionProgress, handleFetchAvailableGenres, handleCreateGenreFusionPlaylist, handleCancelGenreFusion, availableGenres, selectedGenres, setSelectedGenres, genreFusionName, setGenreFusionName,
+            isCategoryScanLoading, categoryScanProgress, categoryScanPhase, handleScanConsolidatedForCategories, handleCreateCategoryPlaylist, handleCancelCategoryScan, availableCategories, selectedCategories, setSelectedCategories, categoryMixName, setCategoryMixName, categoryFilterData,
             getYesterdayDateParts, // Pass getYesterdayDateParts to context
             spotifyFetch
         }}>
@@ -1566,23 +1867,29 @@ function PlaylistView({ playlistId }) {
 
 function PlaylistCreator() {
     const {
-        creatorStatus, creatorError,
+        creatorStatus, creatorError, profile, spotifyFetch, setLibraryVersion,
         isWqxrLoading, wqxrProgress, handleCreateWQXRPlaylist, handleCancelWQXRPlaylist,
         isCustomLoading, customPlaylistName, setCustomPlaylistName, aiPrompt, setAiPrompt, handleCreateAiPlaylist, handleCancelAiPlaylist,
-        isTopTracksLoading, topTracksProgress, handleCreateTopTracksPlaylist, handleCancelTopTracksPlaylist,
-        isAllSongsLoading, allSongsProgress, handleCreateAllSongsPlaylist, handleCancelAllSongsPlaylist,
-        allSongsPhase, allSongsPlaylistsFound, allSongsPlaylistsProcessed, allSongsTotalToProcess, allSongsTracksAdded,
+        isTopTracksLoading, topTracksProgress, handleCreateTopTracksPlaylist, handleCancelTopTracksPlaylist, topTracksTimeRange, setTopTracksTimeRange,
+        isConsolidateLoading, consolidateProgress, handleConsolidatePlaylists, handleCancelConsolidate,
+        consolidatePhase, consolidatePlaylistsFound, consolidatePlaylistsProcessed, consolidateTotalToProcess, consolidateTracksAdded,
         isGenreFusionLoading, genreFusionProgress, handleFetchAvailableGenres, handleCreateGenreFusionPlaylist, handleCancelGenreFusion, availableGenres, selectedGenres, setSelectedGenres, genreFusionName, setGenreFusionName,
-        getYesterdayDateParts,
-        showCreatorStatus, setShowCreatorStatus, fadeCreatorStatusOut
+        isCategoryScanLoading, categoryScanProgress, categoryScanPhase, handleScanConsolidatedForCategories, handleCreateCategoryPlaylist, handleCancelCategoryScan, availableCategories, selectedCategories, setSelectedCategories, categoryMixName, setCategoryMixName, categoryFilterData,
+        getYesterdayDateParts, showCreatorStatus, setShowCreatorStatus, fadeCreatorStatusOut
     } = useContext(AppContext);
 
-    const isAnyCurationLoading = isWqxrLoading || isCustomLoading || isTopTracksLoading || isAllSongsLoading || isGenreFusionLoading;
+    const isAnyCurationLoading = isWqxrLoading || isCustomLoading || isTopTracksLoading || isConsolidateLoading || isGenreFusionLoading || isCategoryScanLoading;
     const { year: yesterdayYear, month: yesterdayMonth, day: yesterdayDay } = getYesterdayDateParts();
 
     const handleGenreSelect = (genre) => {
         setSelectedGenres(prev => 
             prev.includes(genre) ? prev.filter(g => g !== genre) : (prev.length < 3 ? [...prev, genre] : prev)
+        );
+    };
+
+    const handleCategorySelect = (category) => {
+        setSelectedCategories(prev => 
+            prev.includes(category) ? prev.filter(c => c !== category) : (prev.length < 3 ? [...prev, category] : prev)
         );
     };
 
@@ -1608,10 +1915,165 @@ function PlaylistCreator() {
             </div>
 
             <div className="space-y-8">
+                
+                {/* --- CONSOLIDATE & CATEGORIZE LIBRARY --- */}
                 <div className="bg-gray-800 p-6 rounded-lg">
-                    <h2 className="text-xl font-semibold mb-2">Genre Fusion Creator</h2>
+                    <h2 className="text-xl font-semibold mb-2">Consolidate Your Playlists</h2>
                     <p className="text-gray-400 mb-4">
-                        Discover new music by blending genres from your top 100 tracks. Start by scanning for your available genres.
+                        Consolidate your songs into one seamless list with no duplicates. Once consolidated, you have the option to scan those specific songs and automatically generate new playlists based on broad genre categories!
+                    </p>
+
+                    {/* Step 1: Consolidate */}
+                    <div className="mb-6 p-4 bg-gray-900 rounded-md border border-gray-700">
+                        <h3 className="font-semibold text-white mb-2">Step 1: Consolidate All Songs</h3>
+                        <p className="text-sm text-gray-400 mb-4">
+                            Scans your entire library (excluding any previously consolidated lists) and creates "All My Playlists Songs" with zero duplicates.
+                        </p>
+                        <button
+                            onClick={handleConsolidatePlaylists}
+                            disabled={isAnyCurationLoading}
+                            className="bg-orange-600 hover:bg-orange-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
+                        >
+                            {isConsolidateLoading ? 'Consolidating...' : "Consolidate All Playlists"}
+                        </button>
+                        {isConsolidateLoading && (
+                            <button
+                                onClick={handleCancelConsolidate}
+                                className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
+                            >
+                                Cancel
+                            </button>
+                        )}
+                        
+                        {isConsolidateLoading && (
+                            <div className="mt-4 space-y-4">
+                                <div>
+                                    <div className="flex justify-between text-xs text-gray-400 mb-1">
+                                        <span>Overall Progress</span>
+                                        <span>{Math.round(consolidateProgress)}%</span>
+                                    </div>
+                                    <div className="w-full bg-gray-700 rounded-full h-2">
+                                        <div className="bg-orange-500 h-2 rounded-full transition-all duration-300" style={{ width: `${consolidateProgress}%` }}></div>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <p className="text-xs text-gray-400 mb-1">
+                                        Phase 1: Finding Playlists ({consolidatePlaylistsFound} found)
+                                    </p>
+                                    <div className="w-full bg-gray-700 rounded-full h-1.5">
+                                        <div className={`h-1.5 rounded-full transition-all duration-300 ${consolidatePhase === 'fetching_playlists' ? 'bg-orange-400 animate-pulse w-full' : (consolidatePlaylistsFound > 0 ? 'bg-green-500 w-full' : 'w-0')}`}></div>
+                                    </div>
+                                </div>
+
+                                {(consolidatePhase === 'fetching_tracks' || consolidatePhase === 'creating_playlists') && (
+                                    <div>
+                                        <p className="text-xs text-gray-400 mb-1">
+                                            Phase 2: Extracting Songs ({consolidatePlaylistsProcessed} / {consolidatePlaylistsFound} playlists processed)
+                                        </p>
+                                        <div className="w-full bg-gray-700 rounded-full h-1.5">
+                                            <div className={`h-1.5 rounded-full transition-all duration-300 ${consolidatePhase === 'creating_playlists' ? 'bg-green-500' : 'bg-orange-400'}`} style={{ width: `${(consolidatePlaylistsProcessed / Math.max(1, consolidatePlaylistsFound)) * 100}%` }}></div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {consolidatePhase === 'creating_playlists' && (
+                                    <div>
+                                        <p className="text-xs text-gray-400 mb-1">
+                                            Phase 3: Populating Final Playlist ({consolidateTracksAdded} / {consolidateTotalToProcess} songs added)
+                                        </p>
+                                        <div className="w-full bg-gray-700 rounded-full h-1.5">
+                                            <div className="bg-orange-400 h-1.5 rounded-full transition-all duration-300" style={{ width: `${(consolidateTracksAdded / Math.max(1, consolidateTotalToProcess)) * 100}%` }}></div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Step 2: Category Mix */}
+                    <div className="p-4 bg-gray-900 rounded-md border border-gray-700">
+                        <h3 className="font-semibold text-white mb-2">Step 2: Create Category Mix</h3>
+                        <p className="text-sm text-gray-400 mb-4">
+                            Scans your "All My Playlists Songs" to identify the broad categories within them. You can then quickly filter those exact songs into a new, smaller playlist.
+                        </p>
+                        <button
+                            onClick={handleScanConsolidatedForCategories}
+                            disabled={isAnyCurationLoading}
+                            className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
+                        >
+                            {isCategoryScanLoading && categoryScanPhase !== 'filtering_tracks' && categoryScanPhase !== 'creating_playlist' && categoryScanPhase !== 'adding_tracks' ? 'Scanning...' : "Scan Consolidated Songs for Categories"}
+                        </button>
+                        
+                        {isCategoryScanLoading && categoryScanPhase !== 'filtering_tracks' && categoryScanPhase !== 'creating_playlist' && categoryScanPhase !== 'adding_tracks' && (
+                            <button
+                                onClick={handleCancelCategoryScan}
+                                className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
+                            >
+                                Cancel
+                            </button>
+                        )}
+                        
+                        {isCategoryScanLoading && (
+                            <div className="mt-4">
+                                <div className="w-full bg-gray-700 rounded-full h-2.5">
+                                    <div className="bg-blue-500 h-2.5 rounded-full transition-all duration-300" style={{ width: `${categoryScanProgress}%` }}></div>
+                                </div>
+                                <p className="text-center text-sm text-gray-400 mt-1">{Math.round(categoryScanProgress)}%</p>
+                            </div>
+                        )}
+
+                        {availableCategories.length > 0 && !isCategoryScanLoading && (
+                            <div className="mt-6 border-t border-gray-700 pt-4">
+                                <h3 className="text-lg font-semibold mb-2">Categories Found in your Consolidated Songs:</h3>
+                                <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto p-2 bg-gray-800 rounded-md">
+                                    {availableCategories.map(category => (
+                                        <button
+                                            key={category}
+                                            onClick={() => handleCategorySelect(category)}
+                                            disabled={!selectedCategories.includes(category) && selectedCategories.length >= 3}
+                                            className={`px-3 py-1 text-sm rounded-full transition-colors ${selectedCategories.includes(category) ? 'bg-blue-500 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'} ${!selectedCategories.includes(category) && selectedCategories.length >= 3 ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                        >
+                                            {category}
+                                        </button>
+                                    ))}
+                                </div>
+
+                                {selectedCategories.length > 0 && (
+                                    <div className="mt-4">
+                                         <h3 className="text-lg font-semibold mb-2">Selected Categories for Mix:</h3>
+                                         <p className="text-gray-400 italic mb-4">{selectedCategories.join(', ')}</p>
+                                         <div>
+                                            <label className="block mb-1 text-sm font-medium text-gray-300">Playlist Name</label>
+                                            <input type="text" value={categoryMixName} onChange={e => setCategoryMixName(e.target.value)} placeholder="My Consolidated Category Mix" className="w-full p-2 bg-gray-700 rounded-md border-gray-600" />
+                                         </div>
+                                         <button
+                                            onClick={handleCreateCategoryPlaylist}
+                                            disabled={isAnyCurationLoading || selectedCategories.length < 1 || selectedCategories.length > 3}
+                                            className="mt-4 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
+                                        >
+                                            {isCategoryScanLoading && (categoryScanPhase === 'filtering_tracks' || categoryScanPhase === 'creating_playlist' || categoryScanPhase === 'adding_tracks') ? 'Creating...' : 'Create Category Mix Playlist'}
+                                        </button>
+                                         {isCategoryScanLoading && (categoryScanPhase === 'filtering_tracks' || categoryScanPhase === 'creating_playlist' || categoryScanPhase === 'adding_tracks') && (
+                                            <button
+                                                onClick={handleCancelCategoryScan}
+                                                className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
+                                            >
+                                                Cancel
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* --- GENRE FUSION FROM TOP TRACKS --- */}
+                <div className="bg-gray-800 p-6 rounded-lg">
+                    <h2 className="text-xl font-semibold mb-2">Genre Fusion Creator (Top Tracks)</h2>
+                    <p className="text-gray-400 mb-4">
+                        Discover new music by blending specific sub-genres from your top 100 tracks. Start by scanning for your available genres, and we'll use AI to find new songs that match the vibe.
                     </p>
                     <button
                         onClick={handleFetchAvailableGenres}
@@ -1684,6 +2146,7 @@ function PlaylistCreator() {
                     )}
                 </div>
 
+                {/* --- OTHER TOOLS --- */}
                 <div className="bg-gray-800 p-6 rounded-lg">
                     <h2 className="text-xl font-semibold mb-2">WQXR Daily Playlist</h2>
                     <p className="text-gray-400 mb-4">
@@ -1719,9 +2182,28 @@ function PlaylistCreator() {
                     <p className="text-gray-400 mb-4">
                         Instantly create a new playlist composed of your 100 most listened to tracks on Spotify.
                     </p>
+                    <div className="mb-6">
+                        <label className="block mb-2 text-sm font-medium text-gray-300">Songs from:</label>
+                        <div className="flex flex-wrap gap-3">
+                            {[
+                                { id: 'long_term', label: '1 Year' },
+                                { id: 'medium_term', label: '6 Months' },
+                                { id: 'short_term', label: '4 Weeks' }
+                            ].map(range => (
+                                <button
+                                    key={range.id}
+                                    onClick={() => setTopTracksTimeRange(range.id)}
+                                    disabled={isAnyCurationLoading}
+                                    className={`px-4 py-2 text-sm font-medium rounded-full transition-colors ${topTracksTimeRange === range.id ? 'bg-purple-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'} disabled:opacity-50`}
+                                >
+                                    {range.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
                     <button
                         onClick={handleCreateTopTracksPlaylist}
-                        disabled={isAnyCurationLoading}
+                        disabled={isAnyCurationLoading || !topTracksTimeRange}
                         className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
                     >
                         {isTopTracksLoading ? 'Creating...' : "Create Top Tracks Playlist"}
@@ -1740,73 +2222,6 @@ function PlaylistCreator() {
                                 <div className="bg-purple-500 h-2.5 rounded-full" style={{ width: `${topTracksProgress}%` }}></div>
                             </div>
                             <p className="text-center text-sm text-gray-300 mt-1">{Math.round(topTracksProgress)}%</p>
-                        </div>
-                    )}
-                </div>
-
-                <div className="bg-gray-800 p-6 rounded-lg">
-                    <h2 className="text-xl font-semibold mb-2">Playlist with All Unique Songs from Your Playlists</h2>
-                    <p className="text-gray-400 mb-4">
-                        Create one or more playlists containing every unique song from all your existing Spotify playlists.
-                    </p>
-                    <button
-                        onClick={handleCreateAllSongsPlaylist}
-                        disabled={isAnyCurationLoading}
-                        className="bg-orange-600 hover:bg-orange-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
-                    >
-                        {isAllSongsLoading ? 'Creating...' : "Create All My Playlists Songs"}
-                    </button>
-                    {isAllSongsLoading && (
-                        <button
-                            onClick={handleCancelAllSongsPlaylist}
-                            className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
-                        >
-                            Cancel
-                        </button>
-                    )}
-                    
-                    {isAllSongsLoading && (
-                        <div className="mt-4 bg-gray-900 p-4 rounded-md space-y-4">
-                            <div>
-                                <div className="flex justify-between text-xs text-gray-400 mb-1">
-                                    <span>Overall Progress</span>
-                                    <span>{Math.round(allSongsProgress)}%</span>
-                                </div>
-                                <div className="w-full bg-gray-700 rounded-full h-2">
-                                    <div className="bg-orange-500 h-2 rounded-full transition-all duration-300" style={{ width: `${allSongsProgress}%` }}></div>
-                                </div>
-                            </div>
-
-                            <div>
-                                <p className="text-xs text-gray-400 mb-1">
-                                    Step 1: Finding Playlists ({allSongsPlaylistsFound} found)
-                                </p>
-                                <div className="w-full bg-gray-700 rounded-full h-1.5">
-                                    <div className={`h-1.5 rounded-full transition-all duration-300 ${allSongsPhase === 'fetching_playlists' ? 'bg-orange-400 animate-pulse w-full' : (allSongsPlaylistsFound > 0 ? 'bg-green-500 w-full' : 'w-0')}`}></div>
-                                </div>
-                            </div>
-
-                            {(allSongsPhase === 'fetching_tracks' || allSongsPhase === 'creating_playlists') && (
-                                <div>
-                                    <p className="text-xs text-gray-400 mb-1">
-                                        Step 2: Extracting Songs ({allSongsPlaylistsProcessed} / {allSongsPlaylistsFound} playlists processed)
-                                    </p>
-                                    <div className="w-full bg-gray-700 rounded-full h-1.5">
-                                        <div className={`h-1.5 rounded-full transition-all duration-300 ${allSongsPhase === 'creating_playlists' ? 'bg-green-500' : 'bg-orange-400'}`} style={{ width: `${(allSongsPlaylistsProcessed / Math.max(1, allSongsPlaylistsFound)) * 100}%` }}></div>
-                                    </div>
-                                </div>
-                            )}
-
-                            {allSongsPhase === 'creating_playlists' && (
-                                <div>
-                                    <p className="text-xs text-gray-400 mb-1">
-                                        Step 3: Populating Final Playlist ({allSongsTracksAdded} / {allSongsTotalToProcess} songs added)
-                                    </p>
-                                    <div className="w-full bg-gray-700 rounded-full h-1.5">
-                                        <div className="bg-orange-400 h-1.5 rounded-full transition-all duration-300" style={{ width: `${(allSongsTracksAdded / Math.max(1, allSongsTotalToProcess)) * 100}%` }}></div>
-                                    </div>
-                                </div>
-                            )}
                         </div>
                     )}
                 </div>
