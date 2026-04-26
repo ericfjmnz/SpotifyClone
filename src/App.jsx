@@ -1284,7 +1284,6 @@ export default function App() {
                 const { access_token } = await result.json();
                 window.localStorage.setItem("spotify_token", access_token);
                 setToken(access_token);
-                // Removed history.replaceState to prevent security error in iframe
             } catch (error) {
                 console.error("Error fetching token:", error);
                 logout();
