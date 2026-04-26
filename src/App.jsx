@@ -163,7 +163,7 @@ export default function App() {
     const [availableLibraryGenres, setAvailableLibraryGenres] = useState([]);
     const [selectedLibraryGenres, setSelectedLibraryGenres] = useState([]);
     const [libraryFilterName, setLibraryFilterName] = useState("");
-    const [libraryFilterData, setLibraryFilterData] = useState(null);
+    const [categoryFilterData, setCategoryFilterData] = useState(null);
     const [libraryScanTracksFetched, setLibraryScanTracksFetched] = useState(0);
     const [libraryScanTracksTotalToFetch, setLibraryScanTracksTotalToFetch] = useState(0);
     const [libraryScanArtistsTotal, setLibraryScanArtistsTotal] = useState(0);
@@ -472,7 +472,7 @@ export default function App() {
                     }
                 };
     
-                const apiKey = "AIzaSyAsb7lrYNWBzSIUe5RUCOCMib20FzAX61M";
+                const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
                 const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
                 const geminiResponse = await fetch(apiUrl, {
                     method: 'POST',
@@ -1157,7 +1157,7 @@ export default function App() {
                 }
             };
             
-            const apiKey = "AIzaSyAsb7lrYNWBzSIUe5RUCOCMib20FzAX61M"; 
+            const apiKey = import.meta.env.VITE_GEMINI_API_KEY; 
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
             const geminiResponse = await fetch(apiUrl, {
                 method: 'POST',
@@ -1779,6 +1779,14 @@ function PlaylistView({ playlistId }) {
     const { data: playlist, loading } = useSpotifyApi(`/playlists/${playlistId}`, [libraryVersion]);
     const [error, setError] = useState(null);
 
+    // Redirect home if the playlist is missing (e.g., deleted). Must be unconditional.
+    useEffect(() => {
+        if (!loading && !playlist) {
+            setView('home');
+            setSelectedPlaylistId(null);
+        }
+    }, [loading, playlist, setView, setSelectedPlaylistId]);
+
     const playTrack = async (trackUri) => {
         if (!deviceId) {
             setError("No active player found. Please open Spotify on a device and start playing a song.");
@@ -1799,14 +1807,7 @@ function PlaylistView({ playlistId }) {
     };
 
     if (loading) return <div className="text-center p-10">Loading playlist...</div>;
-    if (!playlist) {
-        // This can happen if a playlist was deleted.
-        useEffect(() => {
-            setView('home');
-            setSelectedPlaylistId(null);
-        }, [setView, setSelectedPlaylistId])
-        return null;
-    }
+    if (!playlist) return null;
 
     return (
         <div className="text-white">
