@@ -4,7 +4,6 @@ import {
     getAudioFeaturesForSpotifyIds, getReccoRecommendationsExpanded,
     trackMatchesVibe, distanceFromCenter,
     fetchVibeSourceTracks, RangeSlider,
-    trackPassesLanguageFilter,
     withGatewayRetry, createLibraryCache,
     populateLibraryCache, selectTracksFromCache, addPlaylistToCache
 } from './vibeMatch';
@@ -196,7 +195,6 @@ export default function App() {
     const [vibeRanges, setVibeRanges] = useState(defaultVibeRanges());
     const [vibePlaylistName, setVibePlaylistName] = useState('');
     const [vibeTargetCount, setVibeTargetCount] = useState(100);
-    const [vibeLanguage, setVibeLanguage] = useState('any'); // 'any' | 'english' | 'spanish'
 
     // Shared library cache used by every creator that scans playlists.
     // Populated lazily by the first creator that needs it; subsequent creators
@@ -308,7 +306,7 @@ export default function App() {
 
         try {
             const { year, month, day } = getYesterdayDateParts();
-            const proxyResponse = await fetch(`http://localhost:3001/wqxr-playlist?year=${year}&month=${month}&day=${day}`, { signal });
+            const proxyResponse = await fetch(`/api/wqxr-playlist?year=${year}&month=${month}&day=${day}`, { signal });
             
             if (!proxyResponse.ok) throw new Error('Failed to fetch data from proxy server. Make sure it is running.');
     
@@ -678,6 +676,8 @@ export default function App() {
             setConsolidateTotalToProcess(totalSongs);
             setConsolidateTracksAdded(0);
 
+            const newConsolidatedIds = [];
+
             for (let p = 0; p < numberOfPlaylists; p++) {
                 const startIdx = p * SPOTIFY_PLAYLIST_LIMIT;
                 const endIdx = Math.min(startIdx + SPOTIFY_PLAYLIST_LIMIT, totalSongs);
@@ -725,7 +725,19 @@ export default function App() {
                     };
                 });
                 addPlaylistToCache(lib, newPlaylist, partTracks);
+                newConsolidatedIds.push(newPlaylist.id);
             }
+
+            // Consolidation just produced a single canonical "All My Playlists Songs"
+            // set that represents every track in the user's library. Drop everything
+            // else from the cache so subsequent reads don't double-count tracks
+            // (and so memory doesn't keep ~67k stale track rows around).
+            const keepIds = new Set(newConsolidatedIds);
+            lib.allPlaylists = lib.allPlaylists.filter(p => keepIds.has(p.id));
+            for (const id of Array.from(lib.playlistTracks.keys())) {
+                if (!keepIds.has(id)) lib.playlistTracks.delete(id);
+            }
+            console.log(`[LibraryCache] consolidation complete — pruned cache to ${newConsolidatedIds.length} consolidated playlists`);
 
             setConsolidateProgress(100);
             setCreatedPlaylist({ ...createdPlaylistsInfo[0], _sourceMode: 'existing' });
@@ -840,15 +852,13 @@ export default function App() {
                     text: candidateTextById.get(id) || '',
                 }))
                 .filter(c => c.features && trackMatchesVibe(c.features, vibeRanges))
-                .filter(c => trackPassesLanguageFilter(c.text, vibeLanguage))
                 .filter(c => !excludeUris.has(c.uri))
                 .map(c => ({ ...c, distance: distanceFromCenter(c.features, vibeRanges) }))
                 .sort((a, b) => a.distance - b.distance)
                 .slice(0, vibeTargetCount);
 
             if (!matches.length) {
-                const lang = vibeLanguage !== 'any' ? ` and language=${vibeLanguage}` : '';
-                throw new Error(`No tracks matched your vibe ranges${lang}. Try widening filters.`);
+                throw new Error('No tracks matched your vibe ranges. Try widening the sliders.');
             }
 
             // ---- Create playlist ----
@@ -897,7 +907,7 @@ export default function App() {
             setVibePhase('');
             setVibeAbortController(null);
         }
-    }, [profile, vibeMode, vibeRanges, vibeLanguage, vibePlaylistName, vibeTargetCount, resilientSpotifyFetch, setLibraryVersion]);
+    }, [profile, vibeMode, vibeRanges, vibePlaylistName, vibeTargetCount, resilientSpotifyFetch, setLibraryVersion]);
 
     const handleCancelVibePlaylist = useCallback(() => {
         vibeAbortController?.abort();
@@ -1479,7 +1489,7 @@ export default function App() {
             isGenreFusionLoading, genreFusionProgress, handleFetchAvailableGenres, handleCreateGenreFusionPlaylist, handleCancelGenreFusion, availableGenres, selectedGenres, setSelectedGenres, genreFusionName, setGenreFusionName,
             isLibraryScanLoading, libraryScanProgress, libraryScanPhase, handleScanConsolidatedForGenres, handleCreateLibraryFilterPlaylist, handleCancelLibraryScan, availableLibraryGenres, selectedLibraryGenres, setSelectedLibraryGenres, libraryFilterName, setLibraryFilterName, categoryFilterData,
             libraryScanTracksTotalToFetch, libraryScanTracksFetched, libraryScanArtistsTotal, libraryScanArtistsProcessed, libraryScanTracksAdded, libraryScanTracksTotal,
-            isVibeLoading, vibeProgress, vibePhase, vibeMode, setVibeMode, vibeRanges, setVibeRanges, vibePlaylistName, setVibePlaylistName, vibeTargetCount, setVibeTargetCount, vibeLanguage, setVibeLanguage, handleCreateVibePlaylist, handleCancelVibePlaylist,
+            isVibeLoading, vibeProgress, vibePhase, vibeMode, setVibeMode, vibeRanges, setVibeRanges, vibePlaylistName, setVibePlaylistName, vibeTargetCount, setVibeTargetCount, handleCreateVibePlaylist, handleCancelVibePlaylist,
             getYesterdayDateParts, // Pass getYesterdayDateParts to context
             spotifyFetch
         }}>
@@ -1991,7 +2001,7 @@ function PlaylistCreator() {
         isGenreFusionLoading, genreFusionProgress, handleFetchAvailableGenres, handleCreateGenreFusionPlaylist, handleCancelGenreFusion, availableGenres, selectedGenres, setSelectedGenres, genreFusionName, setGenreFusionName,
         isLibraryScanLoading, libraryScanProgress, libraryScanPhase, handleScanConsolidatedForGenres, handleCreateLibraryFilterPlaylist, handleCancelLibraryScan, availableLibraryGenres, selectedLibraryGenres, setSelectedLibraryGenres, libraryFilterName, setLibraryFilterName, categoryFilterData,
         libraryScanTracksTotalToFetch, libraryScanTracksFetched, libraryScanArtistsTotal, libraryScanArtistsProcessed, libraryScanTracksAdded, libraryScanTracksTotal,
-        isVibeLoading, vibeProgress, vibePhase, vibeMode, setVibeMode, vibeRanges, setVibeRanges, vibePlaylistName, setVibePlaylistName, vibeTargetCount, setVibeTargetCount, vibeLanguage, setVibeLanguage, handleCreateVibePlaylist, handleCancelVibePlaylist,
+        isVibeLoading, vibeProgress, vibePhase, vibeMode, setVibeMode, vibeRanges, setVibeRanges, vibePlaylistName, setVibePlaylistName, vibeTargetCount, setVibeTargetCount, handleCreateVibePlaylist, handleCancelVibePlaylist,
         getYesterdayDateParts, showCreatorStatus, setShowCreatorStatus, fadeCreatorStatusOut
     } = useContext(AppContext);
 
@@ -2462,29 +2472,6 @@ function PlaylistCreator() {
                             ? 'Pulls from your most recent consolidated playlist plus any playlists modified after it.'
                             : 'Uses ReccoBeats to find new songs not in your library, seeded from your recent top tracks.'}
                     </p>
-
-                    {/* Language toggle */}
-                    <div className="flex items-center gap-2 mb-4">
-                        <span className="text-sm text-gray-300">Language:</span>
-                        {[
-                            { value: 'any',     label: 'Any' },
-                            { value: 'english', label: 'English' },
-                            { value: 'spanish', label: 'Spanish' },
-                        ].map(opt => (
-                            <button
-                                key={opt.value}
-                                onClick={() => setVibeLanguage(opt.value)}
-                                disabled={isAnyCurationLoading}
-                                className={`text-xs py-1 px-3 rounded-full transition-colors ${
-                                    vibeLanguage === opt.value
-                                        ? 'bg-purple-600 text-white'
-                                        : 'bg-gray-900 text-gray-400 hover:bg-gray-700'
-                                }`}
-                            >
-                                {opt.label}
-                            </button>
-                        ))}
-                    </div>
 
                     {/* Sliders */}
                     <div className="mb-4 p-4 bg-gray-900 rounded-md">
