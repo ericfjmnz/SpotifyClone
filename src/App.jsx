@@ -1366,6 +1366,11 @@ export default function App() {
         const code = params.get("code");
 
         const getToken = async (authCode) => {
+            // Strip the code from the URL FIRST so any re-run of this effect
+            // (StrictMode double-fire, re-renders, etc.) can't try to reuse it.
+            // Spotify auth codes are single-use; reuse → 400 invalid_grant.
+            window.history.replaceState({}, document.title, window.location.pathname);
+
             const verifier = window.localStorage.getItem("code_verifier");
 
             const params = new URLSearchParams();
