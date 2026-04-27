@@ -1,7 +1,7 @@
-const axios = require('axios');
-const cheerio = require('cheerio');
+import axios from 'axios';
+import * as cheerio from 'cheerio';
 
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   const { year, month, day } = req.query;
 
   if (!year || !month || !day) {
@@ -13,9 +13,21 @@ module.exports = async (req, res) => {
   const url = `https://wqxr-legacy.prod.nypr.digital/playlist-daily/${year}/${month}/${day}/?scheduleStation=q2`;
 
   try {
-    const { data } = await axios.get(url);
-    const $ = cheerio.load(data);
+    const { data, status } = await axios.get(url, {
+      timeout: 8000,
+      validateStatus: (s) => s < 500, // Handle 4xx ourselves with a clear message.
+    });
 
+    if (status !== 200) {
+      console.error(`WQXR returned non-200 status: ${status} for ${url}`);
+      return res.status(502).json({
+        error: 'WQXR returned an unexpected response.',
+        upstreamStatus: status,
+        upstreamUrl: url,
+      });
+    }
+
+    const $ = cheerio.load(data);
     const tracks = [];
 
     $('.playlist-item').each((index, element) => {
@@ -34,12 +46,27 @@ module.exports = async (req, res) => {
       }
     });
 
-    // Cache for an hour at the edge — playlists for past dates don't change,
-    // and even today's won't change minute-to-minute.
+    if (tracks.length === 0) {
+      console.warn(`WQXR page loaded but no tracks parsed for ${url}`);
+      return res.status(502).json({
+        error: 'WQXR page loaded but contained no tracks. The page layout may have changed.',
+        upstreamUrl: url,
+      });
+    }
+
     res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate');
     res.json({ tracks });
   } catch (error) {
-    console.error('Error fetching or parsing playlist data:', error.message);
-    res.status(500).json({ error: 'Failed to fetch playlist data from WQXR.' });
+    console.error('WQXR proxy error:', {
+      message: error.message,
+      code: error.code,
+      url,
+    });
+    return res.status(500).json({
+      error: 'Failed to fetch playlist data from WQXR.',
+      detail: error.message,
+      code: error.code,
+      upstreamUrl: url,
+    });
   }
-};
+}
