@@ -1,4 +1,10 @@
 import React, { useState, useEffect, useCallback, createContext, useContext, useRef } from 'react';
+import {
+    VIBE_FEATURES, VIBE_META, defaultVibeRanges,
+    getAudioFeaturesForSpotifyIds, getReccoRecommendations,
+    trackMatchesVibe, distanceFromCenter,
+    fetchVibeSourceTracks, RangeSlider
+} from './vibeMatch';
 
 // --- Spotify API Configuration ---
 const REDIRECT_URI = window.location.origin;
@@ -154,6 +160,14 @@ export default function App() {
     const [consolidatePlaylistsProcessed, setConsolidatePlaylistsProcessed] = useState(0);
     const [consolidateTotalToProcess, setConsolidateTotalToProcess] = useState(0);
     const [consolidateTracksAdded, setConsolidateTracksAdded] = useState(0);
+    const [isVibeLoading, setIsVibeLoading] = useState(false);
+const [vibeProgress, setVibeProgress] = useState(0);
+const [vibePhase, setVibePhase] = useState(''); // 'gathering' | 'features' | 'creating'
+const [vibeAbortController, setVibeAbortController] = useState(null);
+const [vibeMode, setVibeMode] = useState('library'); // 'library' | 'discover'
+const [vibeRanges, setVibeRanges] = useState(defaultVibeRanges());
+const [vibePlaylistName, setVibePlaylistName] = useState('');
+const [vibeTargetCount, setVibeTargetCount] = useState(100);
 
     // --- LIBRARY GENRE FILTER STATES ---
     const [isLibraryScanLoading, setIsLibraryScanLoading] = useState(false);
@@ -763,6 +777,136 @@ export default function App() {
         }
     }, [profile, token, setLibraryVersion, fetchUniqueTrackUisAndArtistIdsFromPlaylists, spotifyFetch]);
 
+    const handleCreateVibePlaylist = useCallback(async () => {
+    if (!profile) {
+        setCreatorError('Could not get user profile. Please try again.');
+        return;
+    }
+    if (!vibePlaylistName.trim()) {
+        setCreatorError('Please enter a name for your Vibe playlist.');
+        return;
+    }
+
+    const controller = new AbortController();
+    setVibeAbortController(controller);
+    const signal = controller.signal;
+
+    setIsVibeLoading(true);
+    setCreatorError('');
+    setCreatedPlaylist(null);
+    setVibeProgress(0);
+
+    try {
+        let candidateSpotifyIds = [];
+        let excludeUris = new Set();
+
+        if (vibeMode === 'library') {
+            // ---- MODE A: vibe-match against existing library ----
+            setVibePhase('gathering');
+            setCreatorStatus('Locating your most recent consolidated playlist...');
+            const { trackUris } = await fetchVibeSourceTracks(spotifyFetch, signal, (p) => {
+                if (p.phase === 'listing') {
+                    setCreatorStatus(`Scanning playlists (${p.count} found)...`);
+                    setVibeProgress(5);
+                } else if (p.phase === 'gathering') {
+                    setCreatorStatus(`Reading tracks from source playlists (${p.processed} / ${p.total})...`);
+                    setVibeProgress(5 + (p.processed / Math.max(1, p.total)) * 25);
+                }
+            });
+            if (!trackUris.length) throw new Error('No tracks found in your source playlists.');
+            candidateSpotifyIds = trackUris.map(uri => uri.split(':').pop());
+        } else {
+            // ---- MODE B: discover new tracks via ReccoBeats recommendations ----
+            setVibePhase('gathering');
+            setCreatorStatus('Pulling your top tracks for seeds...');
+            setVibeProgress(5);
+
+            // Get top 5 short-term tracks as seeds.
+            const topRes = await spotifyFetch('/me/top/tracks?limit=5&time_range=short_term', { signal });
+            if (!topRes.ok) throw new Error('Could not fetch your top tracks for seeding.');
+            const seedIds = (await topRes.json()).items.map(t => t.id);
+            if (!seedIds.length) throw new Error('You need some listening history before discover mode works.');
+
+            setCreatorStatus('Asking ReccoBeats for vibe-adjacent recommendations...');
+            setVibeProgress(15);
+            // Over-fetch by 4x so we have room to filter.
+            candidateSpotifyIds = await getReccoRecommendations(seedIds, vibeTargetCount * 4, signal);
+            if (!candidateSpotifyIds.length) throw new Error('ReccoBeats returned no recommendations.');
+
+            // Build the exclusion set so we don't re-suggest songs already in the library.
+            setCreatorStatus('Loading your library to avoid duplicates...');
+            const { excludeUris: existingUris } = await fetchVibeSourceTracks(spotifyFetch, signal);
+            excludeUris = existingUris;
+            setVibeProgress(30);
+        }
+
+        // ---- Get audio features for the candidate set ----
+        setVibePhase('features');
+        setCreatorStatus(`Fetching audio features for ${candidateSpotifyIds.length} tracks...`);
+        const features = await getAudioFeaturesForSpotifyIds(candidateSpotifyIds, signal, ({ done, total }) => {
+            setCreatorStatus(`Fetching audio features (${done} / ${total})...`);
+            setVibeProgress(30 + (done / Math.max(1, total)) * 50);
+        });
+
+        // ---- Filter and rank ----
+        const matches = candidateSpotifyIds
+            .map(id => ({ id, uri: `spotify:track:${id}`, features: features.get(id) }))
+            .filter(c => c.features && trackMatchesVibe(c.features, vibeRanges))
+            .filter(c => !excludeUris.has(c.uri))
+            .map(c => ({ ...c, distance: distanceFromCenter(c.features, vibeRanges) }))
+            .sort((a, b) => a.distance - b.distance)
+            .slice(0, vibeTargetCount);
+
+        if (!matches.length) {
+            throw new Error('No tracks matched your vibe ranges. Try widening the sliders.');
+        }
+
+        // ---- Create the playlist ----
+        setVibePhase('creating');
+        setCreatorStatus(`Creating "${vibePlaylistName}" with ${matches.length} matched tracks...`);
+        setVibeProgress(85);
+
+        const playlistRes = await spotifyFetch(`/users/${profile.id}/playlists`, {
+            method: 'POST',
+            body: JSON.stringify({
+                name: vibePlaylistName,
+                description: `Vibe-matched playlist (${vibeMode === 'library' ? 'from library' : 'discovery'}). ${matches.length} tracks.`,
+                public: false,
+            }),
+            signal,
+        });
+        const newPlaylist = await playlistRes.json();
+
+        // Spotify accepts up to 100 URIs per add call. We're <= 100 by design.
+        await spotifyFetch(`/playlists/${newPlaylist.id}/tracks`, {
+            method: 'POST',
+            body: JSON.stringify({ uris: matches.map(m => m.uri) }),
+            signal,
+        });
+
+        setVibeProgress(100);
+        setCreatedPlaylist(newPlaylist);
+        setCreatorStatus(`Vibe playlist created with ${matches.length} tracks!`);
+        setLibraryVersion(v => v + 1);
+    } catch (e) {
+        if (e.name === 'AbortError') {
+            setCreatorStatus('Vibe playlist creation cancelled.');
+        } else {
+            setCreatorError(e.message);
+            console.error('Vibe Match error:', e);
+        }
+    } finally {
+        setIsVibeLoading(false);
+        setVibeProgress(0);
+        setVibePhase('');
+        setVibeAbortController(null);
+    }
+}, [profile, vibeMode, vibeRanges, vibePlaylistName, vibeTargetCount, spotifyFetch, setLibraryVersion]);
+
+const handleCancelVibePlaylist = useCallback(() => {
+    vibeAbortController?.abort();
+}, [vibeAbortController]);
+
     const handleCancelConsolidate = useCallback(() => {
         consolidateAbortController?.abort();
     }, [consolidateAbortController]);
@@ -1371,7 +1515,7 @@ export default function App() {
             isConsolidateLoading, consolidateProgress, handleConsolidatePlaylists, handleCancelConsolidate,
             consolidatePhase, consolidatePlaylistsFound, consolidatePlaylistsProcessed, consolidateTotalToProcess, consolidateTracksAdded,
             isGenreFusionLoading, genreFusionProgress, handleFetchAvailableGenres, handleCreateGenreFusionPlaylist, handleCancelGenreFusion, availableGenres, selectedGenres, setSelectedGenres, genreFusionName, setGenreFusionName,
-            isLibraryScanLoading, libraryScanProgress, libraryScanPhase, handleScanConsolidatedForGenres, handleCreateLibraryFilterPlaylist, handleCancelLibraryScan, availableLibraryGenres, selectedLibraryGenres, setSelectedLibraryGenres, libraryFilterName, setLibraryFilterName, categoryFilterData,
+            isLibraryScanLoading, libraryScanProgress, libraryScanPhase, handleScanConsolidatedForGenres, handleCreateLibraryFilterPlaylist, handleCancelLibraryScan, availableLibraryGenres, selectedLibraryGenres, setSelectedLibraryGenres, libraryFilterName, setLibraryFilterName, categoryFilterData,isVibeLoading, vibeProgress, vibePhase, vibeMode, setVibeMode, vibeRanges, setVibeRanges, vibePlaylistName, setVibePlaylistName, vibeTargetCount, setVibeTargetCount, handleCreateVibePlaylist, handleCancelVibePlaylist,
             libraryScanTracksTotalToFetch, libraryScanTracksFetched, libraryScanArtistsTotal, libraryScanArtistsProcessed, libraryScanTracksAdded, libraryScanTracksTotal,
             getYesterdayDateParts, // Pass getYesterdayDateParts to context
             spotifyFetch
@@ -1875,7 +2019,9 @@ function PlaylistView({ playlistId }) {
 
 function PlaylistCreator() {
     const {
-        creatorStatus, creatorError, profile, spotifyFetch, setLibraryVersion,
+        isVibeLoading, vibeProgress, vibePhase, vibeMode, setVibeMode, vibeRanges, setVibeRanges,
+vibePlaylistName, setVibePlaylistName, vibeTargetCount, setVibeTargetCount,
+handleCreateVibePlaylist, handleCancelVibePlaylist, creatorStatus, creatorError, profile, spotifyFetch, setLibraryVersion,
         isWqxrLoading, wqxrProgress, handleCreateWQXRPlaylist, handleCancelWQXRPlaylist,
         isCustomLoading, customPlaylistName, setCustomPlaylistName, aiPrompt, setAiPrompt, handleCreateAiPlaylist, handleCancelAiPlaylist,
         isTopTracksLoading, topTracksProgress, handleCreateTopTracksPlaylist, handleCancelTopTracksPlaylist, topTracksTimeRange, setTopTracksTimeRange,
@@ -1887,7 +2033,7 @@ function PlaylistCreator() {
         getYesterdayDateParts, showCreatorStatus, setShowCreatorStatus, fadeCreatorStatusOut
     } = useContext(AppContext);
 
-    const isAnyCurationLoading = isWqxrLoading || isCustomLoading || isTopTracksLoading || isConsolidateLoading || isGenreFusionLoading || isLibraryScanLoading;
+    const isAnyCurationLoading = isWqxrLoading || isCustomLoading || isTopTracksLoading || isConsolidateLoading || isGenreFusionLoading || isLibraryScanLoading || isVibeLoading;
     const { year: yesterdayYear, month: yesterdayMonth, day: yesterdayDay } = getYesterdayDateParts();
 
     const handleGenreSelect = (genre) => {
@@ -2304,6 +2450,126 @@ function PlaylistCreator() {
                         </button>
                     )}
                 </div>
+
+                {/* --- VIBE MATCH --- */}
+<div className="bg-gray-800 p-6 rounded-lg border border-white">
+    <h2 className="text-xl font-semibold mb-2">Vibe Match</h2>
+    <p className="text-gray-400 mb-4">
+        Build a playlist by audio feel. Set ranges for danceability, energy, instrumentalness,
+        tempo, and mood — we'll find tracks that match.
+    </p>
+
+    {/* Mode toggle */}
+    <div className="flex gap-2 mb-4">
+        <button
+            onClick={() => setVibeMode('library')}
+            disabled={isAnyCurationLoading}
+            className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
+                vibeMode === 'library'
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-gray-900 text-gray-300 hover:bg-gray-700'
+            }`}
+        >
+            From your library
+        </button>
+        <button
+            onClick={() => setVibeMode('discover')}
+            disabled={isAnyCurationLoading}
+            className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
+                vibeMode === 'discover'
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-gray-900 text-gray-300 hover:bg-gray-700'
+            }`}
+        >
+            Discover new songs
+        </button>
+    </div>
+
+    <p className="text-xs text-gray-500 mb-4">
+        {vibeMode === 'library'
+            ? 'Pulls from your most recent consolidated playlist plus any playlists modified after it.'
+            : 'Uses ReccoBeats to find new songs not in your library, seeded from your recent top tracks.'}
+    </p>
+
+    {/* Sliders */}
+    <div className="mb-4 p-4 bg-gray-900 rounded-md">
+        {VIBE_FEATURES.map(f => (
+            <RangeSlider
+                key={f}
+                meta={VIBE_META[f]}
+                value={vibeRanges[f]}
+                onChange={(v) => setVibeRanges(prev => ({ ...prev, [f]: v }))}
+                disabled={isAnyCurationLoading}
+            />
+        ))}
+        <button
+            onClick={() => setVibeRanges(defaultVibeRanges())}
+            disabled={isAnyCurationLoading}
+            className="text-xs text-gray-400 hover:text-white underline"
+        >
+            Reset all sliders
+        </button>
+    </div>
+
+    {/* Playlist name + size */}
+    <div className="flex flex-col sm:flex-row gap-3 mb-4">
+        <input
+            type="text"
+            placeholder="Playlist name (e.g. 'Sunday morning chill')"
+            value={vibePlaylistName}
+            onChange={(e) => setVibePlaylistName(e.target.value)}
+            disabled={isAnyCurationLoading}
+            className="flex-1 p-2 bg-gray-900 rounded-md border border-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-500"
+        />
+        <select
+            value={vibeTargetCount}
+            onChange={(e) => setVibeTargetCount(parseInt(e.target.value, 10))}
+            disabled={isAnyCurationLoading}
+            className="p-2 bg-gray-900 rounded-md border border-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-500"
+        >
+            <option value={25}>Up to 25 songs</option>
+            <option value={50}>Up to 50 songs</option>
+            <option value={100}>Up to 100 songs</option>
+        </select>
+    </div>
+
+    {/* Create / cancel */}
+    <button
+        onClick={handleCreateVibePlaylist}
+        disabled={isAnyCurationLoading || !vibePlaylistName.trim()}
+        className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
+    >
+        {isVibeLoading ? 'Building...' : 'Create Vibe Playlist'}
+    </button>
+    {isVibeLoading && (
+        <button
+            onClick={handleCancelVibePlaylist}
+            className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
+        >
+            Cancel
+        </button>
+    )}
+
+    {/* Progress */}
+    {isVibeLoading && (
+        <div className="mt-4">
+            <div className="flex justify-between text-xs text-gray-400 mb-1">
+                <span>
+                    {vibePhase === 'gathering' && 'Gathering source tracks'}
+                    {vibePhase === 'features' && 'Looking up audio features'}
+                    {vibePhase === 'creating' && 'Building playlist'}
+                </span>
+                <span>{Math.round(vibeProgress)}%</span>
+            </div>
+            <div className="w-full bg-gray-700 rounded-full h-2">
+                <div
+                    className="bg-purple-500 h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${vibeProgress}%` }}
+                />
+            </div>
+        </div>
+    )}
+</div>
             </div>
         </div>
     );
