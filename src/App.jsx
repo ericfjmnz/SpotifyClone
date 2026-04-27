@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useCallback, createContext, useContext, useRef } from 'react';
 import {
     VIBE_FEATURES, VIBE_META, defaultVibeRanges,
-    getAudioFeaturesForSpotifyIds, getReccoRecommendations,
+    getAudioFeaturesForSpotifyIds, getReccoRecommendationsExpanded,
     trackMatchesVibe, distanceFromCenter,
-    fetchVibeSourceTracks, RangeSlider
+    fetchVibeSourceTracks, RangeSlider,
+    trackPassesLanguageFilter,
+    withGatewayRetry, createLibraryCache,
+    populateLibraryCache, selectTracksFromCache, addPlaylistToCache
 } from './vibeMatch';
 
 // --- Spotify API Configuration ---
@@ -91,7 +94,7 @@ function LoginScreen() {
         <div className="h-screen w-full flex items-center justify-center bg-gray-900 text-white p-4">
             <div className="text-center bg-gray-800 p-8 rounded-lg shadow-2xl max-w-2xl w-full">
                 <h1 className="text-4xl font-bold mb-2">Connect to Spotify</h1>
-                <p className="text-gray-400 mb-6">Please send your Spotify email and I will send you the Client ID.</p>
+                <p className="text-gray-400 mb-6">Please send your Spotify email to efjmnz@hotmail.com and I will send you the Client ID.</p>
                 
                 <form onSubmit={handleLogin} className="flex flex-col gap-4">
                     <input
@@ -160,14 +163,6 @@ export default function App() {
     const [consolidatePlaylistsProcessed, setConsolidatePlaylistsProcessed] = useState(0);
     const [consolidateTotalToProcess, setConsolidateTotalToProcess] = useState(0);
     const [consolidateTracksAdded, setConsolidateTracksAdded] = useState(0);
-    const [isVibeLoading, setIsVibeLoading] = useState(false);
-const [vibeProgress, setVibeProgress] = useState(0);
-const [vibePhase, setVibePhase] = useState(''); // 'gathering' | 'features' | 'creating'
-const [vibeAbortController, setVibeAbortController] = useState(null);
-const [vibeMode, setVibeMode] = useState('library'); // 'library' | 'discover'
-const [vibeRanges, setVibeRanges] = useState(defaultVibeRanges());
-const [vibePlaylistName, setVibePlaylistName] = useState('');
-const [vibeTargetCount, setVibeTargetCount] = useState(100);
 
     // --- LIBRARY GENRE FILTER STATES ---
     const [isLibraryScanLoading, setIsLibraryScanLoading] = useState(false);
@@ -192,13 +187,32 @@ const [vibeTargetCount, setVibeTargetCount] = useState(100);
     const [selectedGenres, setSelectedGenres] = useState([]);
     const [genreFusionName, setGenreFusionName] = useState("");
 
+    // --- VIBE MATCH STATES ---
+    const [isVibeLoading, setIsVibeLoading] = useState(false);
+    const [vibeProgress, setVibeProgress] = useState(0);
+    const [vibePhase, setVibePhase] = useState('');
+    const [vibeAbortController, setVibeAbortController] = useState(null);
+    const [vibeMode, setVibeMode] = useState('library'); // 'library' | 'discover'
+    const [vibeRanges, setVibeRanges] = useState(defaultVibeRanges());
+    const [vibePlaylistName, setVibePlaylistName] = useState('');
+    const [vibeTargetCount, setVibeTargetCount] = useState(100);
+    const [vibeLanguage, setVibeLanguage] = useState('any'); // 'any' | 'english' | 'spanish'
+
+    // Shared library cache used by every creator that scans playlists.
+    // Populated lazily by the first creator that needs it; subsequent creators
+    // hit cache instead of refetching. Extended by addPlaylistToCache() after
+    // creators successfully add new playlists/tracks. Cleared on logout/refresh.
+    const libraryCacheRef = useRef(createLibraryCache());
+
     const logout = useCallback(() => {
         setToken(null);
         if(player) player.disconnect();
         window.localStorage.removeItem("spotify_token");
         window.localStorage.removeItem("spotify_client_id");
         window.localStorage.removeItem("code_verifier");
-        
+        // Reset the in-memory library cache so the next session starts fresh.
+        libraryCacheRef.current = createLibraryCache();
+
         setView('home');
         setSelectedPlaylistId(null);
     }, [player]);
@@ -243,6 +257,9 @@ const [vibeTargetCount, setVibeTargetCount] = useState(100);
         throw new Error("Max retries reached for Spotify API");
     }, [token, logout]);
 
+    // Wraps spotifyFetch to also retry on 502/503/504 (transient Spotify gateway errors).
+    const resilientSpotifyFetch = useCallback(withGatewayRetry(spotifyFetch), [spotifyFetch]);
+
     useEffect(() => {
         if (creatorStatus || creatorError) {
             setShowCreatorStatus(true);
@@ -269,84 +286,10 @@ const [vibeTargetCount, setVibeTargetCount] = useState(100);
 
     const delay = (ms) => new Promise(res => setTimeout(res, ms));
 
-    const useSpotifyDataHelpers = (token) => {
-        const fetchUniqueTrackUisAndArtistIdsFromPlaylists = useCallback(async (signal, onProgress) => {
-            let allPlaylists = [];
-            let nextPlaylistsUrl = '/me/playlists?limit=50';
-
-            if (onProgress) onProgress({ phase: 'fetching_playlists', found: 0 });
-
-            while (nextPlaylistsUrl) {
-                const response = await spotifyFetch(nextPlaylistsUrl, { signal });
-
-                if (!response.ok) {
-                    throw new Error(`Failed to fetch playlists: ${response.status}`);
-                }
-                const data = await response.json();
-                
-                const filteredPlaylists = data.items.filter(playlist => 
-                    playlist && playlist.name && !playlist.name.toLowerCase().includes('all my playlists songs')
-                );
-                
-                allPlaylists = allPlaylists.concat(filteredPlaylists);
-                
-                if (onProgress) onProgress({ phase: 'fetching_playlists', found: allPlaylists.length });
-                nextPlaylistsUrl = data.next ? data.next.replace('https://api.spotify.com/v1', '') : null;
-                await delay(50);
-            }
-
-            if (allPlaylists.length === 0) {
-                throw new Error('You have no valid playlists in your Spotify library to process.');
-            }
-            
-            const uniqueTrackUris = new Set();
-            const uniqueArtistIds = new Set();
-            let processedPlaylistsCount = 0;
-
-            if (onProgress) onProgress({ phase: 'fetching_tracks', processed: 0, total: allPlaylists.length });
-
-            const concurrency = 5; 
-            for (let i = 0; i < allPlaylists.length; i += concurrency) {
-                const chunk = allPlaylists.slice(i, i + concurrency);
-                
-                await Promise.all(chunk.map(async (playlist) => {
-                    let nextTracksUrl = playlist.tracks.href.replace('https://api.spotify.com/v1', '');
-                    while (nextTracksUrl) {
-                        const response = await spotifyFetch(nextTracksUrl, { signal });
-                        
-                        if (!response.ok) {
-                            console.warn(`Failed to fetch tracks for playlist "${playlist.name}" (${playlist.id}): ${response.status}`);
-                            break;
-                        }
-                        const data = await response.json();
-                        if (data.items) {
-                            data.items.forEach(item => {
-                                if (item.track && typeof item.track.uri === 'string' && item.track.uri.startsWith('spotify:track:')) {
-                                    uniqueTrackUris.add(item.track.uri);
-                                    item.track.artists.forEach(artist => uniqueArtistIds.add(artist.id));
-                                }
-                            });
-                        }
-                        nextTracksUrl = data.next ? data.next.replace('https://api.spotify.com/v1', '') : null;
-                    }
-                }));
-                
-                processedPlaylistsCount += chunk.length;
-                if (onProgress) onProgress({ 
-                    phase: 'fetching_tracks', 
-                    processed: Math.min(processedPlaylistsCount, allPlaylists.length), 
-                    total: allPlaylists.length 
-                });
-            }
-            
-            return { uniqueTrackUris: Array.from(uniqueTrackUris), uniqueArtistIds: Array.from(uniqueArtistIds) };
-        }, [spotifyFetch]);
-
-        return { fetchUniqueTrackUisAndArtistIdsFromPlaylists };
-    };
-
-    const { fetchUniqueTrackUisAndArtistIdsFromPlaylists } = useSpotifyDataHelpers(token);
-
+    // Note: a previous fetchUniqueTrackUisAndArtistIdsFromPlaylists helper used to
+    // live here. All creators that scanned the library have been migrated to the
+    // shared cache (populateLibraryCache + selectTracksFromCache). The old helper
+    // was removed to avoid two parallel scan implementations drifting apart.
 
     const handleCreateWQXRPlaylist = useCallback(async () => {
         if(!profile) {
@@ -365,9 +308,9 @@ const [vibeTargetCount, setVibeTargetCount] = useState(100);
 
         try {
             const { year, month, day } = getYesterdayDateParts();
-            const proxyResponse = await fetch(`/api/wqxr-playlist?year=${year}&month=${month}&day=${day}`, { signal });
+            const proxyResponse = await fetch(`http://localhost:3001/wqxr-playlist?year=${year}&month=${month}&day=${day}`, { signal });
             
-            if (!proxyResponse.ok) throw new Error('Failed to fetch playlist data from WQXR.');
+            if (!proxyResponse.ok) throw new Error('Failed to fetch data from proxy server. Make sure it is running.');
     
             const data = await proxyResponse.json();
             const wqxrTracks = data.tracks;
@@ -404,8 +347,10 @@ const [vibeTargetCount, setVibeTargetCount] = useState(100);
                 body: JSON.stringify({ uris: trackUris }), signal
             });
             
-            setCreatedPlaylist(newPlaylist);
+            setCreatedPlaylist({ ...newPlaylist, _sourceMode: 'discover' });
             setCreatorStatus('WQXR playlist created successfully!');
+            // Keep the shared cache in sync — only if it's already populated.
+            addPlaylistToCache(libraryCacheRef.current.library, newPlaylist, trackUris.map(uri => ({ uri })));
             localStorage.removeItem('/me/playlists?limit=50');
             setLibraryVersion(v => v + 1);
         
@@ -552,8 +497,9 @@ const [vibeTargetCount, setVibeTargetCount] = useState(100);
                 await delay(100);
             }
     
-            setCreatedPlaylist(newPlaylist);
+            setCreatedPlaylist({ ...newPlaylist, _sourceMode: 'discover' });
             setCreatorStatus('AI-powered playlist created successfully!');
+            addPlaylistToCache(libraryCacheRef.current.library, newPlaylist, uniqueTrackUris.map(uri => ({ uri })));
             localStorage.removeItem('/me/playlists?limit=50');
             setLibraryVersion(v => v + 1);
             resetCustomForm();
@@ -643,8 +589,9 @@ const [vibeTargetCount, setVibeTargetCount] = useState(100);
             });
             setTopTracksProgress(100);
 
-            setCreatedPlaylist(newPlaylist);
+            setCreatedPlaylist({ ...newPlaylist, _sourceMode: 'existing' });
             setCreatorStatus('Top 100 tracks playlist created successfully!');
+            addPlaylistToCache(libraryCacheRef.current.library, newPlaylist, trackUris.map(uri => ({ uri })));
             localStorage.removeItem('/me/playlists?limit=50');
             setLibraryVersion(v => v + 1);
         } catch (e) {
@@ -690,33 +637,43 @@ const [vibeTargetCount, setVibeTargetCount] = useState(100);
         setConsolidateTracksAdded(0);
 
         try {
-            // Scan all playlists EXCLUDING "All My Playlists Songs"
-            const { uniqueTrackUris } = await fetchUniqueTrackUisAndArtistIdsFromPlaylists(signal, (info) => {
-                if (info.phase === 'fetching_playlists') {
+            const lib = libraryCacheRef.current.library;
+
+            // Populate the shared cache (or hit it if a previous creator already did).
+            await populateLibraryCache(resilientSpotifyFetch, signal, (info) => {
+                if (info.phase === 'cached') {
+                    setConsolidatePhase('fetching_tracks');
+                    setConsolidatePlaylistsFound(info.playlists);
+                    setCreatorStatus(`Using cached library (${info.tracks} tracks across ${info.playlists} playlists)...`);
+                    setConsolidateProgress(75);
+                } else if (info.phase === 'listing') {
                     setConsolidatePhase('fetching_playlists');
-                    setConsolidatePlaylistsFound(info.found);
-                    setCreatorStatus(`Scanning library (Found ${info.found} playlists)...`);
-                    setConsolidateProgress(5); 
-                } else if (info.phase === 'fetching_tracks') {
+                    setConsolidatePlaylistsFound(info.count);
+                    setCreatorStatus(`Scanning library (Found ${info.count} playlists)...`);
+                    setConsolidateProgress(5);
+                } else if (info.phase === 'gathering') {
                     setConsolidatePhase('fetching_tracks');
                     setConsolidatePlaylistsProcessed(info.processed);
                     setConsolidatePlaylistsFound(info.total);
                     setCreatorStatus(`Extracting unique songs (${info.processed} / ${info.total} playlists processed)...`);
-                    setConsolidateProgress(10 + (info.processed / info.total) * 70); 
+                    setConsolidateProgress(10 + (info.processed / Math.max(1, info.total)) * 70);
                 }
-            });
-            
-            const trackUrisArray = uniqueTrackUris;
+            }, lib);
+
+            // Pull tracks from non-consolidated playlists only — this is the
+            // existing Consolidate behavior (don't re-consolidate consolidated sets).
+            const sel = selectTracksFromCache(lib, { excludeConsolidated: true });
+            const trackUrisArray = sel.trackUris;
 
             if (trackUrisArray.length === 0) {
                 throw new Error('Could not find any unique songs across your playlists.');
             }
 
-            const SPOTIFY_PLAYLIST_LIMIT = 10000; 
+            const SPOTIFY_PLAYLIST_LIMIT = 10000;
             const totalSongs = trackUrisArray.length;
             const numberOfPlaylists = Math.ceil(totalSongs / SPOTIFY_PLAYLIST_LIMIT);
             const createdPlaylistsInfo = [];
-            
+
             setConsolidatePhase('creating_playlists');
             setConsolidateTotalToProcess(totalSongs);
             setConsolidateTracksAdded(0);
@@ -725,12 +682,12 @@ const [vibeTargetCount, setVibeTargetCount] = useState(100);
                 const startIdx = p * SPOTIFY_PLAYLIST_LIMIT;
                 const endIdx = Math.min(startIdx + SPOTIFY_PLAYLIST_LIMIT, totalSongs);
                 const currentChunkOfTracks = trackUrisArray.slice(startIdx, endIdx);
-                
+
                 const playlistName = `All My Playlists Songs - Part ${p + 1} - ${new Date().toLocaleDateString()}`;
                 const description = `Part ${p + 1} of a consolidated playlist containing all unique songs from your library.`;
 
                 setCreatorStatus(`Creating target playlist "${playlistName}" (${p + 1}/${numberOfPlaylists})...`);
-                const playlistResponse = await spotifyFetch(`/users/${profile.id}/playlists`, {
+                const playlistResponse = await resilientSpotifyFetch(`/users/${profile.id}/playlists`, {
                     method: 'POST',
                     body: JSON.stringify({ name: playlistName, description: description, public: false }), signal
                 });
@@ -741,23 +698,37 @@ const [vibeTargetCount, setVibeTargetCount] = useState(100);
                 const chunkSizeForAdding = 100;
                 for (let i = 0; i < currentChunkOfTracks.length; i += chunkSizeForAdding) {
                     const chunk = currentChunkOfTracks.slice(i, i + chunkSizeForAdding);
-                    
-                    await spotifyFetch(`/playlists/${newPlaylist.id}/tracks`, {
+
+                    await resilientSpotifyFetch(`/playlists/${newPlaylist.id}/tracks`, {
                         method: 'POST',
                         body: JSON.stringify({ uris: chunk }), signal
                     });
 
                     setConsolidateTracksAdded(prev => prev + chunk.length);
                     const currentOverallProgress = (startIdx + i + chunk.length);
-                    setConsolidateProgress(80 + (currentOverallProgress / totalSongs) * 20); 
-                    
+                    setConsolidateProgress(80 + (currentOverallProgress / totalSongs) * 20);
+
                     setCreatorStatus(`Adding ${chunk.length} songs to "${newPlaylist.name}"...`);
                     await delay(50);
                 }
+
+                // Add this part to the cache as a new consolidated playlist so
+                // Library Filter (which scans consolidated sets) can pick it up
+                // immediately without a refresh.
+                const partTracks = currentChunkOfTracks.map(uri => {
+                    const info = sel.trackInfo.get(uri);
+                    return {
+                        uri,
+                        name: info?.name || '',
+                        artistsText: info?.artistsText || '',
+                        artistIds: info?.artistIds || [],
+                    };
+                });
+                addPlaylistToCache(lib, newPlaylist, partTracks);
             }
-            
+
             setConsolidateProgress(100);
-            setCreatedPlaylist(createdPlaylistsInfo[0]);
+            setCreatedPlaylist({ ...createdPlaylistsInfo[0], _sourceMode: 'existing' });
             setCreatorStatus(`Successfully consolidated library! Created ${numberOfPlaylists} playlist(s) from ${totalSongs} unique songs.`);
             localStorage.removeItem('/me/playlists?limit=50');
             setLibraryVersion(v => v + 1);
@@ -772,140 +743,165 @@ const [vibeTargetCount, setVibeTargetCount] = useState(100);
         } finally {
             setIsConsolidateLoading(false);
             setConsolidateProgress(0);
-            setConsolidateAbortController(null); 
+            setConsolidateAbortController(null);
             setConsolidatePhase('');
         }
-    }, [profile, token, setLibraryVersion, fetchUniqueTrackUisAndArtistIdsFromPlaylists, spotifyFetch]);
+    }, [profile, token, setLibraryVersion, resilientSpotifyFetch]);
 
     const handleCreateVibePlaylist = useCallback(async () => {
-    if (!profile) {
-        setCreatorError('Could not get user profile. Please try again.');
-        return;
-    }
-    if (!vibePlaylistName.trim()) {
-        setCreatorError('Please enter a name for your Vibe playlist.');
-        return;
-    }
+        if (!profile) { setCreatorError('Could not get user profile. Please try again.'); return; }
+        if (!vibePlaylistName.trim()) { setCreatorError('Please enter a name for your Vibe playlist.'); return; }
 
-    const controller = new AbortController();
-    setVibeAbortController(controller);
-    const signal = controller.signal;
+        const controller = new AbortController();
+        setVibeAbortController(controller);
+        const signal = controller.signal;
 
-    setIsVibeLoading(true);
-    setCreatorError('');
-    setCreatedPlaylist(null);
-    setVibeProgress(0);
-
-    try {
-        let candidateSpotifyIds = [];
-        let excludeUris = new Set();
-
-        if (vibeMode === 'library') {
-            // ---- MODE A: vibe-match against existing library ----
-            setVibePhase('gathering');
-            setCreatorStatus('Locating your most recent consolidated playlist...');
-            const { trackUris } = await fetchVibeSourceTracks(spotifyFetch, signal, (p) => {
-                if (p.phase === 'listing') {
-                    setCreatorStatus(`Scanning playlists (${p.count} found)...`);
-                    setVibeProgress(5);
-                } else if (p.phase === 'gathering') {
-                    setCreatorStatus(`Reading tracks from source playlists (${p.processed} / ${p.total})...`);
-                    setVibeProgress(5 + (p.processed / Math.max(1, p.total)) * 25);
-                }
-            });
-            if (!trackUris.length) throw new Error('No tracks found in your source playlists.');
-            candidateSpotifyIds = trackUris.map(uri => uri.split(':').pop());
-        } else {
-            // ---- MODE B: discover new tracks via ReccoBeats recommendations ----
-            setVibePhase('gathering');
-            setCreatorStatus('Pulling your top tracks for seeds...');
-            setVibeProgress(5);
-
-            // Get top 5 short-term tracks as seeds.
-            const topRes = await spotifyFetch('/me/top/tracks?limit=5&time_range=short_term', { signal });
-            if (!topRes.ok) throw new Error('Could not fetch your top tracks for seeding.');
-            const seedIds = (await topRes.json()).items.map(t => t.id);
-            if (!seedIds.length) throw new Error('You need some listening history before discover mode works.');
-
-            setCreatorStatus('Asking ReccoBeats for vibe-adjacent recommendations...');
-            setVibeProgress(15);
-            // Over-fetch by 4x so we have room to filter.
-            candidateSpotifyIds = await getReccoRecommendations(seedIds, vibeTargetCount * 4, signal);
-            if (!candidateSpotifyIds.length) throw new Error('ReccoBeats returned no recommendations.');
-
-            // Build the exclusion set so we don't re-suggest songs already in the library.
-            setCreatorStatus('Loading your library to avoid duplicates...');
-            const { excludeUris: existingUris } = await fetchVibeSourceTracks(spotifyFetch, signal);
-            excludeUris = existingUris;
-            setVibeProgress(30);
-        }
-
-        // ---- Get audio features for the candidate set ----
-        setVibePhase('features');
-        setCreatorStatus(`Fetching audio features for ${candidateSpotifyIds.length} tracks...`);
-        const features = await getAudioFeaturesForSpotifyIds(candidateSpotifyIds, signal, ({ done, total }) => {
-            setCreatorStatus(`Fetching audio features (${done} / ${total})...`);
-            setVibeProgress(30 + (done / Math.max(1, total)) * 50);
-        });
-
-        // ---- Filter and rank ----
-        const matches = candidateSpotifyIds
-            .map(id => ({ id, uri: `spotify:track:${id}`, features: features.get(id) }))
-            .filter(c => c.features && trackMatchesVibe(c.features, vibeRanges))
-            .filter(c => !excludeUris.has(c.uri))
-            .map(c => ({ ...c, distance: distanceFromCenter(c.features, vibeRanges) }))
-            .sort((a, b) => a.distance - b.distance)
-            .slice(0, vibeTargetCount);
-
-        if (!matches.length) {
-            throw new Error('No tracks matched your vibe ranges. Try widening the sliders.');
-        }
-
-        // ---- Create the playlist ----
-        setVibePhase('creating');
-        setCreatorStatus(`Creating "${vibePlaylistName}" with ${matches.length} matched tracks...`);
-        setVibeProgress(85);
-
-        const playlistRes = await spotifyFetch(`/users/${profile.id}/playlists`, {
-            method: 'POST',
-            body: JSON.stringify({
-                name: vibePlaylistName,
-                description: `Vibe-matched playlist (${vibeMode === 'library' ? 'from library' : 'discovery'}). ${matches.length} tracks.`,
-                public: false,
-            }),
-            signal,
-        });
-        const newPlaylist = await playlistRes.json();
-
-        // Spotify accepts up to 100 URIs per add call. We're <= 100 by design.
-        await spotifyFetch(`/playlists/${newPlaylist.id}/tracks`, {
-            method: 'POST',
-            body: JSON.stringify({ uris: matches.map(m => m.uri) }),
-            signal,
-        });
-
-        setVibeProgress(100);
-        setCreatedPlaylist(newPlaylist);
-        setCreatorStatus(`Vibe playlist created with ${matches.length} tracks!`);
-        setLibraryVersion(v => v + 1);
-    } catch (e) {
-        if (e.name === 'AbortError') {
-            setCreatorStatus('Vibe playlist creation cancelled.');
-        } else {
-            setCreatorError(e.message);
-            console.error('Vibe Match error:', e);
-        }
-    } finally {
-        setIsVibeLoading(false);
+        setIsVibeLoading(true);
+        setCreatorError('');
+        setCreatedPlaylist(null);
         setVibeProgress(0);
-        setVibePhase('');
-        setVibeAbortController(null);
-    }
-}, [profile, vibeMode, vibeRanges, vibePlaylistName, vibeTargetCount, spotifyFetch, setLibraryVersion]);
 
-const handleCancelVibePlaylist = useCallback(() => {
-    vibeAbortController?.abort();
-}, [vibeAbortController]);
+        const cache = libraryCacheRef.current;
+
+        try {
+            let candidateSpotifyIds = [];
+            let candidateTextById = new Map();
+            let excludeUris = new Set();
+
+            if (vibeMode === 'library') {
+                // ---- MODE A: vibe-match against existing library ----
+                setVibePhase('gathering');
+                const { trackUris, trackInfo, fromCache } = await fetchVibeSourceTracks(
+                    resilientSpotifyFetch, signal,
+                    (p) => {
+                        if (p.phase === 'cached') {
+                            setCreatorStatus(`Using cached library (${p.count} tracks)...`);
+                            setVibeProgress(25);
+                        } else if (p.phase === 'listing') {
+                            setCreatorStatus(`Scanning playlists (${p.count} found)...`);
+                            setVibeProgress(5);
+                        } else if (p.phase === 'gathering') {
+                            setCreatorStatus(`Reading tracks from source playlists (${p.processed} / ${p.total})...`);
+                            setVibeProgress(5 + (p.processed / Math.max(1, p.total)) * 25);
+                        }
+                    },
+                    cache.library,
+                );
+                if (!trackUris.length) throw new Error('No tracks found in your source playlists.');
+
+                candidateSpotifyIds = trackUris.map(uri => uri.split(':').pop());
+                for (const [uri, info] of trackInfo.entries()) {
+                    const id = uri.split(':').pop();
+                    candidateTextById.set(id, info.searchText || '');
+                }
+                console.log(`[VibeMatch] Mode A: ${candidateSpotifyIds.length} candidates (cache=${fromCache})`);
+            } else {
+                // ---- MODE B: discover new tracks ----
+                setVibePhase('gathering');
+                setCreatorStatus('Pulling your top tracks for seeds...');
+                setVibeProgress(5);
+
+                const topRes = await resilientSpotifyFetch('/me/top/tracks?limit=5&time_range=short_term', { signal });
+                if (!topRes.ok) throw new Error('Could not fetch your top tracks for seeding.');
+                const seedIds = (await topRes.json()).items.map(t => t.id);
+                if (!seedIds.length) throw new Error('You need some listening history before discover mode works.');
+
+                setCreatorStatus('Asking ReccoBeats for vibe-adjacent recommendations...');
+                setVibeProgress(15);
+                const reco = await getReccoRecommendationsExpanded(seedIds, 100, signal);
+                candidateSpotifyIds = reco.ids;
+                candidateTextById = reco.textById;
+                if (!candidateSpotifyIds.length) throw new Error('ReccoBeats returned no recommendations.');
+
+                setCreatorStatus('Loading your library to dedupe...');
+                const lib = await fetchVibeSourceTracks(resilientSpotifyFetch, signal, null, cache.library);
+                excludeUris = lib.excludeUris;
+                setVibeProgress(30);
+            }
+
+            // ---- Audio features (cached across runs) ----
+            setVibePhase('features');
+            setCreatorStatus(`Fetching audio features for ${candidateSpotifyIds.length} tracks...`);
+            const features = await getAudioFeaturesForSpotifyIds(
+                candidateSpotifyIds, signal,
+                ({ done, total }) => {
+                    setCreatorStatus(`Fetching audio features (${done} / ${total})...`);
+                    setVibeProgress(30 + (done / Math.max(1, total)) * 50);
+                },
+                cache.features,
+            );
+
+            // ---- Filter by vibe + language, rank, take top N ----
+            const matches = candidateSpotifyIds
+                .map(id => ({
+                    id,
+                    uri: `spotify:track:${id}`,
+                    features: features.get(id),
+                    text: candidateTextById.get(id) || '',
+                }))
+                .filter(c => c.features && trackMatchesVibe(c.features, vibeRanges))
+                .filter(c => trackPassesLanguageFilter(c.text, vibeLanguage))
+                .filter(c => !excludeUris.has(c.uri))
+                .map(c => ({ ...c, distance: distanceFromCenter(c.features, vibeRanges) }))
+                .sort((a, b) => a.distance - b.distance)
+                .slice(0, vibeTargetCount);
+
+            if (!matches.length) {
+                const lang = vibeLanguage !== 'any' ? ` and language=${vibeLanguage}` : '';
+                throw new Error(`No tracks matched your vibe ranges${lang}. Try widening filters.`);
+            }
+
+            // ---- Create playlist ----
+            setVibePhase('creating');
+            setCreatorStatus(`Creating "${vibePlaylistName}" with ${matches.length} matched tracks...`);
+            setVibeProgress(85);
+
+            const playlistRes = await resilientSpotifyFetch(`/users/${profile.id}/playlists`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    name: vibePlaylistName,
+                    description: `Vibe-matched (${vibeMode === 'library' ? 'from library' : 'discovery'}). ${matches.length} tracks.`,
+                    public: false,
+                }),
+                signal,
+            });
+            const newPlaylist = await playlistRes.json();
+
+            await resilientSpotifyFetch(`/playlists/${newPlaylist.id}/tracks`, {
+                method: 'POST',
+                body: JSON.stringify({ uris: matches.map(m => m.uri) }),
+                signal,
+            });
+
+            // Add the new playlist to the cache so subsequent creators see it.
+            // For Mode B (discover) this also makes those new tracks count as
+            // "existing library" for the next Mode A run.
+            const trackEntries = matches.map(m => ({
+                uri: m.uri,
+                name: '',
+                artistsText: m.text || '',
+                artistIds: [],
+            }));
+            addPlaylistToCache(cache.library, newPlaylist, trackEntries);
+
+            setVibeProgress(100);
+            setCreatedPlaylist({ ...newPlaylist, _sourceMode: vibeMode === 'library' ? 'existing' : 'discover' });
+            setCreatorStatus(`Vibe playlist created with ${matches.length} tracks!`);
+            setLibraryVersion(v => v + 1);
+        } catch (e) {
+            if (e.name === 'AbortError') setCreatorStatus('Vibe playlist creation cancelled.');
+            else { setCreatorError(e.message); console.error('Vibe Match error:', e); }
+        } finally {
+            setIsVibeLoading(false);
+            setVibeProgress(0);
+            setVibePhase('');
+            setVibeAbortController(null);
+        }
+    }, [profile, vibeMode, vibeRanges, vibeLanguage, vibePlaylistName, vibeTargetCount, resilientSpotifyFetch, setLibraryVersion]);
+
+    const handleCancelVibePlaylist = useCallback(() => {
+        vibeAbortController?.abort();
+    }, [vibeAbortController]);
 
     const handleCancelConsolidate = useCallback(() => {
         consolidateAbortController?.abort();
@@ -934,84 +930,45 @@ const handleCancelVibePlaylist = useCallback(() => {
         setCreatorStatus('Looking for your consolidated playlists...');
 
         try {
-            // 1. Find all "All My Playlists Songs"
-            let allPlaylists = [];
-            let nextPlaylistsUrl = '/me/playlists?limit=50';
-            while (nextPlaylistsUrl) {
-                const response = await spotifyFetch(nextPlaylistsUrl, { signal });
-                const data = await response.json();
-                allPlaylists = allPlaylists.concat(data.items);
-                nextPlaylistsUrl = data.next ? data.next.replace('https://api.spotify.com/v1', '') : null;
-            }
+            const lib = libraryCacheRef.current.library;
 
-            const consolidatedPlaylists = allPlaylists.filter(p => p && p.name && p.name.toLowerCase().includes('all my playlists songs'));
+            // Populate (or hit) the shared cache.
+            await populateLibraryCache(resilientSpotifyFetch, signal, (info) => {
+                if (info.phase === 'cached') {
+                    setCreatorStatus(`Using cached library (${info.tracks} tracks across ${info.playlists} playlists)...`);
+                    setLibraryScanProgress(10);
+                } else if (info.phase === 'listing') {
+                    setCreatorStatus(`Scanning library (Found ${info.count} playlists)...`);
+                    setLibraryScanProgress(2);
+                } else if (info.phase === 'gathering') {
+                    setCreatorStatus(`Reading playlist tracks (${info.processed} / ${info.total})...`);
+                    setLibraryScanProgress(2 + (info.processed / Math.max(1, info.total)) * 8);
+                }
+            }, lib);
 
-            if (consolidatedPlaylists.length === 0) {
+            // Pull only the most recent consolidated set.
+            const sel = selectTracksFromCache(lib, { onlyMostRecentConsolidated: true });
+
+            if (!sel.sourcePlaylists.length) {
                 throw new Error("No consolidated playlists found. Please run Step 1 'Consolidate All Playlists' first.");
             }
-
-            // Group by date and find the most recent batch
-            let latestTimestamp = 0;
-            let latestDateStr = '';
-
-            consolidatedPlaylists.forEach(p => {
-                const parts = p.name.split('-');
-                if (parts.length >= 3) {
-                    const dateStr = parts[parts.length - 1].trim();
-                    const dateObj = new Date(dateStr);
-                    if (!isNaN(dateObj.getTime()) && dateObj.getTime() > latestTimestamp) {
-                        latestTimestamp = dateObj.getTime();
-                        latestDateStr = dateStr;
-                    }
-                }
-            });
-
-            let playlistsToScan = consolidatedPlaylists;
-            if (latestDateStr) {
-                playlistsToScan = consolidatedPlaylists.filter(p => p.name.includes(latestDateStr));
-                
-                // Warn if the playlist is very old
-                const daysOld = (Date.now() - latestTimestamp) / (1000 * 60 * 60 * 24);
-                if (daysOld > 30) {
-                    throw new Error(`Your most recent consolidated playlists are from ${latestDateStr} (over a month ago). Please run Step 1 again to generate an up-to-date consolidation!`);
-                }
+            if (sel.daysOld != null && sel.daysOld > 30) {
+                throw new Error(`Your most recent consolidated playlists are from ${sel.mostRecentDate} (over a month ago). Please run Step 1 again to generate an up-to-date consolidation!`);
             }
 
-            const totalTracksToFetch = playlistsToScan.reduce((sum, p) => sum + p.tracks.total, 0);
+            const totalTracksToFetch = sel.sourcePlaylists.reduce((sum, p) => sum + (p.tracks?.total || 0), 0);
             setLibraryScanTracksTotalToFetch(totalTracksToFetch);
+            setLibraryScanTracksFetched(sel.trackUris.length);
 
             setLibraryScanPhase('fetching_tracks');
-            setCreatorStatus(`Found ${playlistsToScan.length} recent consolidated playlist(s). Extracting songs...`);
-            setLibraryScanProgress(10);
+            setCreatorStatus(`Found ${sel.sourcePlaylists.length} recent consolidated playlist(s). ${sel.trackUris.length} unique songs.`);
+            setLibraryScanProgress(40);
 
-            // 2. Fetch tracks from only those playlists
+            // Build the trackDetailsMap (uri → Set of artist IDs) from cached info.
             const trackDetailsMap = new Map();
-            const uniqueArtistIds = new Set();
-            let fetchedTracksCount = 0;
-
-            for (const playlist of playlistsToScan) {
-                let nextTracksUrl = playlist.tracks.href.replace('https://api.spotify.com/v1', '');
-                while (nextTracksUrl) {
-                    const response = await spotifyFetch(nextTracksUrl, { signal });
-                    const data = await response.json();
-                    if (data.items) {
-                        fetchedTracksCount += data.items.length;
-                        data.items.forEach(item => {
-                            if (item.track && item.track.uri) {
-                                if (!trackDetailsMap.has(item.track.uri)) {
-                                    trackDetailsMap.set(item.track.uri, new Set());
-                                }
-                                item.track.artists.forEach(artist => {
-                                    uniqueArtistIds.add(artist.id);
-                                    trackDetailsMap.get(item.track.uri).add(artist.id);
-                                });
-                            }
-                        });
-                    }
-                    setLibraryScanTracksFetched(fetchedTracksCount);
-                    setLibraryScanProgress(10 + (fetchedTracksCount / totalTracksToFetch) * 30); // 10% to 40%
-                    nextTracksUrl = data.next ? data.next.replace('https://api.spotify.com/v1', '') : null;
-                }
+            const uniqueArtistIds = new Set(sel.uniqueArtistIds);
+            for (const [uri, info] of sel.trackInfo) {
+                trackDetailsMap.set(uri, new Set(info.artistIds));
             }
 
             const artistIdsArray = Array.from(uniqueArtistIds);
@@ -1157,8 +1114,9 @@ const handleCancelVibePlaylist = useCallback(() => {
                 await delay(100);
             }
     
-            setCreatedPlaylist(newPlaylist);
+            setCreatedPlaylist({ ...newPlaylist, _sourceMode: 'existing' });
             setCreatorStatus("Filtered genre playlist created successfully!");
+            addPlaylistToCache(libraryCacheRef.current.library, newPlaylist, finalTrackUris.map(uri => ({ uri })));
             localStorage.removeItem('/me/playlists?limit=50');
             setLibraryVersion(v => v + 1);
             setSelectedLibraryGenres([]);
@@ -1359,8 +1317,9 @@ const handleCancelVibePlaylist = useCallback(() => {
                 signal
             });
     
-            setCreatedPlaylist(newPlaylist);
+            setCreatedPlaylist({ ...newPlaylist, _sourceMode: 'discover' });
             setCreatorStatus("Genre Fusion playlist created successfully!");
+            addPlaylistToCache(libraryCacheRef.current.library, newPlaylist, finalTrackUris.map(uri => ({ uri })));
             localStorage.removeItem('/me/playlists?limit=50');
             setLibraryVersion(v => v + 1);
             setSelectedGenres([]);
@@ -1407,7 +1366,6 @@ const handleCancelVibePlaylist = useCallback(() => {
         const code = params.get("code");
 
         const getToken = async (authCode) => {
-            window.history.replaceState({}, document.title, window.location.pathname);
             const verifier = window.localStorage.getItem("code_verifier");
 
             const params = new URLSearchParams();
@@ -1429,7 +1387,6 @@ const handleCancelVibePlaylist = useCallback(() => {
                 const { access_token } = await result.json();
                 window.localStorage.setItem("spotify_token", access_token);
                 setToken(access_token);
-                window.history.replaceState({}, document.title, window.location.pathname);
             } catch (error) {
                 console.error("Error fetching token:", error);
                 logout();
@@ -1515,8 +1472,9 @@ const handleCancelVibePlaylist = useCallback(() => {
             isConsolidateLoading, consolidateProgress, handleConsolidatePlaylists, handleCancelConsolidate,
             consolidatePhase, consolidatePlaylistsFound, consolidatePlaylistsProcessed, consolidateTotalToProcess, consolidateTracksAdded,
             isGenreFusionLoading, genreFusionProgress, handleFetchAvailableGenres, handleCreateGenreFusionPlaylist, handleCancelGenreFusion, availableGenres, selectedGenres, setSelectedGenres, genreFusionName, setGenreFusionName,
-            isLibraryScanLoading, libraryScanProgress, libraryScanPhase, handleScanConsolidatedForGenres, handleCreateLibraryFilterPlaylist, handleCancelLibraryScan, availableLibraryGenres, selectedLibraryGenres, setSelectedLibraryGenres, libraryFilterName, setLibraryFilterName, categoryFilterData,isVibeLoading, vibeProgress, vibePhase, vibeMode, setVibeMode, vibeRanges, setVibeRanges, vibePlaylistName, setVibePlaylistName, vibeTargetCount, setVibeTargetCount, handleCreateVibePlaylist, handleCancelVibePlaylist,
+            isLibraryScanLoading, libraryScanProgress, libraryScanPhase, handleScanConsolidatedForGenres, handleCreateLibraryFilterPlaylist, handleCancelLibraryScan, availableLibraryGenres, selectedLibraryGenres, setSelectedLibraryGenres, libraryFilterName, setLibraryFilterName, categoryFilterData,
             libraryScanTracksTotalToFetch, libraryScanTracksFetched, libraryScanArtistsTotal, libraryScanArtistsProcessed, libraryScanTracksAdded, libraryScanTracksTotal,
+            isVibeLoading, vibeProgress, vibePhase, vibeMode, setVibeMode, vibeRanges, setVibeRanges, vibePlaylistName, setVibePlaylistName, vibeTargetCount, setVibeTargetCount, vibeLanguage, setVibeLanguage, handleCreateVibePlaylist, handleCancelVibePlaylist,
             getYesterdayDateParts, // Pass getYesterdayDateParts to context
             spotifyFetch
         }}>
@@ -2019,9 +1977,7 @@ function PlaylistView({ playlistId }) {
 
 function PlaylistCreator() {
     const {
-        isVibeLoading, vibeProgress, vibePhase, vibeMode, setVibeMode, vibeRanges, setVibeRanges,
-vibePlaylistName, setVibePlaylistName, vibeTargetCount, setVibeTargetCount,
-handleCreateVibePlaylist, handleCancelVibePlaylist, creatorStatus, creatorError, profile, spotifyFetch, setLibraryVersion,
+        creatorStatus, creatorError, createdPlaylist, profile, spotifyFetch, setLibraryVersion,
         isWqxrLoading, wqxrProgress, handleCreateWQXRPlaylist, handleCancelWQXRPlaylist,
         isCustomLoading, customPlaylistName, setCustomPlaylistName, aiPrompt, setAiPrompt, handleCreateAiPlaylist, handleCancelAiPlaylist,
         isTopTracksLoading, topTracksProgress, handleCreateTopTracksPlaylist, handleCancelTopTracksPlaylist, topTracksTimeRange, setTopTracksTimeRange,
@@ -2030,6 +1986,7 @@ handleCreateVibePlaylist, handleCancelVibePlaylist, creatorStatus, creatorError,
         isGenreFusionLoading, genreFusionProgress, handleFetchAvailableGenres, handleCreateGenreFusionPlaylist, handleCancelGenreFusion, availableGenres, selectedGenres, setSelectedGenres, genreFusionName, setGenreFusionName,
         isLibraryScanLoading, libraryScanProgress, libraryScanPhase, handleScanConsolidatedForGenres, handleCreateLibraryFilterPlaylist, handleCancelLibraryScan, availableLibraryGenres, selectedLibraryGenres, setSelectedLibraryGenres, libraryFilterName, setLibraryFilterName, categoryFilterData,
         libraryScanTracksTotalToFetch, libraryScanTracksFetched, libraryScanArtistsTotal, libraryScanArtistsProcessed, libraryScanTracksAdded, libraryScanTracksTotal,
+        isVibeLoading, vibeProgress, vibePhase, vibeMode, setVibeMode, vibeRanges, setVibeRanges, vibePlaylistName, setVibePlaylistName, vibeTargetCount, setVibeTargetCount, vibeLanguage, setVibeLanguage, handleCreateVibePlaylist, handleCancelVibePlaylist,
         getYesterdayDateParts, showCreatorStatus, setShowCreatorStatus, fadeCreatorStatusOut
     } = useContext(AppContext);
 
@@ -2055,7 +2012,18 @@ handleCreateVibePlaylist, handleCancelVibePlaylist, creatorStatus, creatorError,
             <div className="sticky top-0 z-10 bg-gray-800/95 backdrop-blur-sm py-3 mb-4">
                 {showCreatorStatus && (creatorError || creatorStatus) && (
                     <div className={`p-3 rounded-md flex items-center justify-between transition-opacity duration-2000 ${creatorError ? 'bg-red-800' : 'bg-blue-800'} ${fadeCreatorStatusOut ? 'opacity-0' : 'opacity-100'}`}>
-                        <p className="flex-1">{creatorError || creatorStatus}</p>
+                        <p className="flex-1">
+                            {creatorError || creatorStatus}
+                            {!creatorError && createdPlaylist?._sourceMode && (
+                                <span className={`ml-2 inline-block text-xs px-2 py-0.5 rounded ${
+                                    createdPlaylist._sourceMode === 'existing'
+                                        ? 'bg-blue-600 text-blue-100'
+                                        : 'bg-green-700 text-green-100'
+                                }`}>
+                                    {createdPlaylist._sourceMode === 'existing' ? 'From your library' : 'Newly discovered'}
+                                </span>
+                            )}
+                        </p>
                         <button 
                             onClick={() => setShowCreatorStatus(false)} 
                             className="ml-4 text-white hover:text-gray-300 focus:outline-none"
@@ -2452,124 +2420,146 @@ handleCreateVibePlaylist, handleCancelVibePlaylist, creatorStatus, creatorError,
                 </div>
 
                 {/* --- VIBE MATCH --- */}
-<div className="bg-gray-800 p-6 rounded-lg border border-white">
-    <h2 className="text-xl font-semibold mb-2">Vibe Match</h2>
-    <p className="text-gray-400 mb-4">
-        Build a playlist by audio feel. Set ranges for danceability, energy, instrumentalness,
-        tempo, and mood — we'll find tracks that match.
-    </p>
+                <div className="bg-gray-800 p-6 rounded-lg border border-white">
+                    <h2 className="text-xl font-semibold mb-2">Vibe Match</h2>
+                    <p className="text-gray-400 mb-4">
+                        Build a playlist by audio feel. Set ranges for danceability, energy, instrumentalness, tempo, and mood — we'll find tracks that match.
+                    </p>
 
-    {/* Mode toggle */}
-    <div className="flex gap-2 mb-4">
-        <button
-            onClick={() => setVibeMode('library')}
-            disabled={isAnyCurationLoading}
-            className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
-                vibeMode === 'library'
-                    ? 'bg-purple-600 text-white'
-                    : 'bg-gray-900 text-gray-300 hover:bg-gray-700'
-            }`}
-        >
-            From your library
-        </button>
-        <button
-            onClick={() => setVibeMode('discover')}
-            disabled={isAnyCurationLoading}
-            className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
-                vibeMode === 'discover'
-                    ? 'bg-purple-600 text-white'
-                    : 'bg-gray-900 text-gray-300 hover:bg-gray-700'
-            }`}
-        >
-            Discover new songs
-        </button>
-    </div>
+                    {/* Mode toggle */}
+                    <div className="flex gap-2 mb-4">
+                        <button
+                            onClick={() => setVibeMode('library')}
+                            disabled={isAnyCurationLoading}
+                            className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
+                                vibeMode === 'library'
+                                    ? 'bg-purple-600 text-white'
+                                    : 'bg-gray-900 text-gray-300 hover:bg-gray-700'
+                            }`}
+                        >
+                            From your library
+                        </button>
+                        <button
+                            onClick={() => setVibeMode('discover')}
+                            disabled={isAnyCurationLoading}
+                            className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
+                                vibeMode === 'discover'
+                                    ? 'bg-purple-600 text-white'
+                                    : 'bg-gray-900 text-gray-300 hover:bg-gray-700'
+                            }`}
+                        >
+                            Discover new songs
+                        </button>
+                    </div>
 
-    <p className="text-xs text-gray-500 mb-4">
-        {vibeMode === 'library'
-            ? 'Pulls from your most recent consolidated playlist plus any playlists modified after it.'
-            : 'Uses ReccoBeats to find new songs not in your library, seeded from your recent top tracks.'}
-    </p>
+                    <p className="text-xs text-gray-500 mb-4">
+                        {vibeMode === 'library'
+                            ? 'Pulls from your most recent consolidated playlist plus any playlists modified after it.'
+                            : 'Uses ReccoBeats to find new songs not in your library, seeded from your recent top tracks.'}
+                    </p>
 
-    {/* Sliders */}
-    <div className="mb-4 p-4 bg-gray-900 rounded-md">
-        {VIBE_FEATURES.map(f => (
-            <RangeSlider
-                key={f}
-                meta={VIBE_META[f]}
-                value={vibeRanges[f]}
-                onChange={(v) => setVibeRanges(prev => ({ ...prev, [f]: v }))}
-                disabled={isAnyCurationLoading}
-            />
-        ))}
-        <button
-            onClick={() => setVibeRanges(defaultVibeRanges())}
-            disabled={isAnyCurationLoading}
-            className="text-xs text-gray-400 hover:text-white underline"
-        >
-            Reset all sliders
-        </button>
-    </div>
+                    {/* Language toggle */}
+                    <div className="flex items-center gap-2 mb-4">
+                        <span className="text-sm text-gray-300">Language:</span>
+                        {[
+                            { value: 'any',     label: 'Any' },
+                            { value: 'english', label: 'English' },
+                            { value: 'spanish', label: 'Spanish' },
+                        ].map(opt => (
+                            <button
+                                key={opt.value}
+                                onClick={() => setVibeLanguage(opt.value)}
+                                disabled={isAnyCurationLoading}
+                                className={`text-xs py-1 px-3 rounded-full transition-colors ${
+                                    vibeLanguage === opt.value
+                                        ? 'bg-purple-600 text-white'
+                                        : 'bg-gray-900 text-gray-400 hover:bg-gray-700'
+                                }`}
+                            >
+                                {opt.label}
+                            </button>
+                        ))}
+                    </div>
 
-    {/* Playlist name + size */}
-    <div className="flex flex-col sm:flex-row gap-3 mb-4">
-        <input
-            type="text"
-            placeholder="Playlist name (e.g. 'Sunday morning chill')"
-            value={vibePlaylistName}
-            onChange={(e) => setVibePlaylistName(e.target.value)}
-            disabled={isAnyCurationLoading}
-            className="flex-1 p-2 bg-gray-900 rounded-md border border-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-500"
-        />
-        <select
-            value={vibeTargetCount}
-            onChange={(e) => setVibeTargetCount(parseInt(e.target.value, 10))}
-            disabled={isAnyCurationLoading}
-            className="p-2 bg-gray-900 rounded-md border border-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-500"
-        >
-            <option value={25}>Up to 25 songs</option>
-            <option value={50}>Up to 50 songs</option>
-            <option value={100}>Up to 100 songs</option>
-        </select>
-    </div>
+                    {/* Sliders */}
+                    <div className="mb-4 p-4 bg-gray-900 rounded-md">
+                        {VIBE_FEATURES.map(f => (
+                            <RangeSlider
+                                key={f}
+                                meta={VIBE_META[f]}
+                                value={vibeRanges[f]}
+                                onChange={(v) => setVibeRanges(prev => ({ ...prev, [f]: v }))}
+                                disabled={isAnyCurationLoading}
+                            />
+                        ))}
+                        <button
+                            onClick={() => setVibeRanges(defaultVibeRanges())}
+                            disabled={isAnyCurationLoading}
+                            className="text-xs text-gray-400 hover:text-white underline"
+                        >
+                            Reset all sliders
+                        </button>
+                    </div>
 
-    {/* Create / cancel */}
-    <button
-        onClick={handleCreateVibePlaylist}
-        disabled={isAnyCurationLoading || !vibePlaylistName.trim()}
-        className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
-    >
-        {isVibeLoading ? 'Building...' : 'Create Vibe Playlist'}
-    </button>
-    {isVibeLoading && (
-        <button
-            onClick={handleCancelVibePlaylist}
-            className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
-        >
-            Cancel
-        </button>
-    )}
+                    {/* Playlist name + size */}
+                    <div className="flex flex-col sm:flex-row gap-3 mb-4">
+                        <input
+                            type="text"
+                            placeholder="Playlist name (e.g. 'Sunday morning chill')"
+                            value={vibePlaylistName}
+                            onChange={(e) => setVibePlaylistName(e.target.value)}
+                            disabled={isAnyCurationLoading}
+                            className="flex-1 p-2 bg-gray-900 rounded-md border border-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        />
+                        <select
+                            value={vibeTargetCount}
+                            onChange={(e) => setVibeTargetCount(parseInt(e.target.value, 10))}
+                            disabled={isAnyCurationLoading}
+                            className="p-2 bg-gray-900 rounded-md border border-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        >
+                            <option value={25}>Up to 25 songs</option>
+                            <option value={50}>Up to 50 songs</option>
+                            <option value={100}>Up to 100 songs</option>
+                        </select>
+                    </div>
 
-    {/* Progress */}
-    {isVibeLoading && (
-        <div className="mt-4">
-            <div className="flex justify-between text-xs text-gray-400 mb-1">
-                <span>
-                    {vibePhase === 'gathering' && 'Gathering source tracks'}
-                    {vibePhase === 'features' && 'Looking up audio features'}
-                    {vibePhase === 'creating' && 'Building playlist'}
-                </span>
-                <span>{Math.round(vibeProgress)}%</span>
-            </div>
-            <div className="w-full bg-gray-700 rounded-full h-2">
-                <div
-                    className="bg-purple-500 h-2 rounded-full transition-all duration-300"
-                    style={{ width: `${vibeProgress}%` }}
-                />
-            </div>
-        </div>
-    )}
-</div>
+                    {/* Create / cancel */}
+                    <button
+                        onClick={handleCreateVibePlaylist}
+                        disabled={isAnyCurationLoading || !vibePlaylistName.trim()}
+                        className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
+                    >
+                        {isVibeLoading ? 'Building...' : 'Create Vibe Playlist'}
+                    </button>
+                    {isVibeLoading && (
+                        <button
+                            onClick={handleCancelVibePlaylist}
+                            className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
+                        >
+                            Cancel
+                        </button>
+                    )}
+
+                    {/* Progress */}
+                    {isVibeLoading && (
+                        <div className="mt-4">
+                            <div className="flex justify-between text-xs text-gray-400 mb-1">
+                                <span>
+                                    {vibePhase === 'gathering' && 'Gathering source tracks'}
+                                    {vibePhase === 'features' && 'Looking up audio features'}
+                                    {vibePhase === 'creating' && 'Building playlist'}
+                                </span>
+                                <span>{Math.round(vibeProgress)}%</span>
+                            </div>
+                            <div className="w-full bg-gray-700 rounded-full h-2">
+                                <div
+                                    className="bg-purple-500 h-2 rounded-full transition-all duration-300"
+                                    style={{ width: `${vibeProgress}%` }}
+                                />
+                            </div>
+                        </div>
+                    )}
+                </div>
             </div>
         </div>
     );
