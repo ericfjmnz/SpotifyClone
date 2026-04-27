@@ -1926,7 +1926,7 @@ function PlaylistCreator() {
             <div className="space-y-8">
                 
                 {/* --- CONSOLIDATE & CATEGORIZE LIBRARY --- */}
-                <div className="bg-gray-800 p-6 rounded-lg">
+                <div className="bg-gray-800 p-6 rounded-lg border border-white">
                     <h2 className="text-xl font-semibold mb-2">Consolidate Your Playlists</h2>
                     <p className="text-gray-400 mb-4">
                         Consolidate your songs into one seamless list with no duplicates. Once consolidated, you have the option to scan those specific songs and automatically generate new playlists based on specific genres!
@@ -2117,7 +2117,7 @@ function PlaylistCreator() {
                 </div>
 
                 {/* --- GENRE FUSION FROM TOP TRACKS --- */}
-                <div className="bg-gray-800 p-6 rounded-lg">
+                <div className="bg-gray-800 p-6 rounded-lg border border-white">
                     <h2 className="text-xl font-semibold mb-2">Genre Fusion Creator (Top Tracks)</h2>
                     <p className="text-gray-400 mb-4">
                         Discover new music by blending specific sub-genres from your top 100 tracks. Start by scanning for your available genres, and we'll use AI to find new songs that match the vibe.
@@ -2194,7 +2194,7 @@ function PlaylistCreator() {
                 </div>
 
                 {/* --- OTHER TOOLS --- */}
-                <div className="bg-gray-800 p-6 rounded-lg">
+                <div className="bg-gray-800 p-6 rounded-lg border border-white">
                     <h2 className="text-xl font-semibold mb-2">WQXR Daily Playlist</h2>
                     <p className="text-gray-400 mb-4">
                         Create a new playlist based on the music played yesterday ({yesterdayDay}-{yesterdayMonth}-{yesterdayYear}) on WQXR.
@@ -2224,7 +2224,7 @@ function PlaylistCreator() {
                     )}
                 </div>
 
-                <div className="bg-gray-800 p-6 rounded-lg">
+                <div className="bg-gray-800 p-6 rounded-lg border border-white">
                     <h2 className="text-xl font-semibold mb-2">Playlist from Your Top Tracks</h2>
                     <p className="text-gray-400 mb-4">
                         Instantly create a new playlist composed of your 100 most listened to tracks on Spotify.
@@ -2273,7 +2273,7 @@ function PlaylistCreator() {
                     )}
                 </div>
 
-                <div className="bg-gray-800 p-6 rounded-lg">
+                <div className="bg-gray-800 p-6 rounded-lg border border-white">
                     <h2 className="text-xl font-semibold mb-2">AI-Powered Playlist Creator</h2>
                     <p className="text-gray-400 mb-4">
                         Describe the kind of playlist you want, and let AI build it for you. The AI will generate a playlist with up to 200 songs.
