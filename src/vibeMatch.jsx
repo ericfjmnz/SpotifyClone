@@ -126,7 +126,8 @@ export async function getAudioFeaturesForSpotifyIds(spotifyIds, signal, onProgre
 export async function getReccoRecommendations(seedSpotifyIds, size, signal) {
     if (!seedSpotifyIds.length) return [];
     const seeds = seedSpotifyIds.slice(0, 5);
-    const params = seeds.map(id => `seeds=${encodeURIComponent(id)}`).join('&') + `&size=${size}`;
+    const clampedSize = Math.max(1, Math.min(100, size));   // ← new line
+    const params = seeds.map(id => `seeds=${encodeURIComponent(id)}`).join('&') + `&size=${clampedSize}`;
     const data = await reccoFetch(`/track/recommendation?${params}`, signal);
     const items = Array.isArray(data) ? data : (data.content || []);
     // Each item should have an href back to Spotify.
