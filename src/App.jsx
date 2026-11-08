@@ -164,6 +164,22 @@ export default function App() {
     const [consolidateTotalToProcess, setConsolidateTotalToProcess] = useState(0);
     const [consolidateTracksAdded, setConsolidateTracksAdded] = useState(0);
 
+    // --- LIBRARY GENRE FILTER STATES (OLD) ---
+    const [isLibraryScanLoading, setIsLibraryScanLoading] = useState(false);
+    const [libraryScanProgress, setLibraryScanProgress] = useState(0);
+    const [libraryScanPhase, setLibraryScanPhase] = useState('');
+    const [libraryScanAbortController, setLibraryScanAbortController] = useState(null);
+    const [availableLibraryGenres, setAvailableLibraryGenres] = useState([]);
+    const [selectedLibraryGenres, setSelectedLibraryGenres] = useState([]);
+    const [libraryFilterName, setLibraryFilterName] = useState("");
+    const [categoryFilterData, setCategoryFilterData] = useState(null);
+    const [libraryScanTracksFetched, setLibraryScanTracksFetched] = useState(0);
+    const [libraryScanTracksTotalToFetch, setLibraryScanTracksTotalToFetch] = useState(0);
+    const [libraryScanArtistsTotal, setLibraryScanArtistsTotal] = useState(0);
+    const [libraryScanArtistsProcessed, setLibraryScanArtistsProcessed] = useState(0);
+    const [libraryScanTracksAdded, setLibraryScanTracksAdded] = useState(0);
+    const [libraryScanTracksTotal, setLibraryScanTracksTotal] = useState(0);
+
     const [isGenreFusionLoading, setIsGenreFusionLoading] = useState(false);
     const [genreFusionProgress, setGenreFusionProgress] = useState(0);
     const [genreFusionAbortController, setGenreFusionAbortController] = useState(null);
@@ -181,7 +197,7 @@ export default function App() {
     const [vibePlaylistName, setVibePlaylistName] = useState('');
     const [vibeTargetCount, setVibeTargetCount] = useState(100);
 
-    // --- ADVANCED GENRE ENGINE STATES ---
+    // --- ADVANCED GENRE ENGINE STATES (NEW) ---
     const [genreEngineMode, setGenreEngineMode] = useState('consolidated');
     const [isGenreEngineScanning, setIsGenreEngineScanning] = useState(false);
     const [genreEngineProgress, setGenreEngineProgress] = useState(0);
@@ -256,7 +272,6 @@ export default function App() {
         }
     }, [creatorStatus, creatorError]);
 
-
     const getYesterdayDateParts = useCallback(() => {
         const yesterday = new Date();
         yesterday.setDate(yesterday.getDate() - 1);
@@ -269,10 +284,7 @@ export default function App() {
     const delay = (ms) => new Promise(res => setTimeout(res, ms));
 
     const handleClearCache = useCallback(() => {
-        // Reset the in-memory ref
         libraryCacheRef.current = createLibraryCache();
-        
-        // Clear all cached playlist data from localStorage
         const keysToRemove = [];
         for (let i = 0; i < localStorage.length; i++) {
             const key = localStorage.key(i);
@@ -281,7 +293,6 @@ export default function App() {
             }
         }
         keysToRemove.forEach(key => localStorage.removeItem(key));
-        
         setCreatorStatus('Library cache cleared successfully. Next scan will pull fresh data from Spotify.');
         setTimeout(() => setShowCreatorStatus(false), 5000);
     }, []);
@@ -651,7 +662,7 @@ export default function App() {
                     setCreatorStatus(`Extracting unique songs (${info.processed} / ${info.total} playlists processed)...`);
                     setConsolidateProgress(10 + (info.processed / Math.max(1, info.total)) * 70);
                 }
-            }, lib, profile?.id);
+            }, lib, profile.id);
 
             const sel = selectTracksFromCache(lib, { excludeConsolidated: true });
             const trackUrisArray = sel.trackUris;
@@ -746,6 +757,249 @@ export default function App() {
         }
     }, [profile, token, setLibraryVersion, resilientSpotifyFetch]);
 
+    // --- OLD LIBRARY GENRE FILTER (Preserved) ---
+    const handleScanConsolidatedForGenres = useCallback(async () => {
+        if (!profile) {
+            setCreatorError('Could not get user profile. Please try again.');
+            return;
+        }
+        const controller = new AbortController();
+        setLibraryScanAbortController(controller);
+        const signal = controller.signal;
+
+        setIsLibraryScanLoading(true);
+        setCreatorError('');
+        setAvailableLibraryGenres([]);
+        setLibraryScanProgress(0);
+        
+        setLibraryScanTracksTotalToFetch(0);
+        setLibraryScanTracksFetched(0);
+        setLibraryScanArtistsTotal(0);
+        setLibraryScanArtistsProcessed(0);
+        
+        setLibraryScanPhase('fetching_playlists');
+        setCreatorStatus('Looking for your consolidated playlists...');
+
+        try {
+            const lib = libraryCacheRef.current.library;
+
+            await populateLibraryCache(resilientSpotifyFetch, signal, (info) => {
+                if (info.phase === 'cached') {
+                    setCreatorStatus(`Using cached library (${info.tracks} tracks across ${info.playlists} playlists)...`);
+                    setLibraryScanProgress(10);
+                } else if (info.phase === 'listing') {
+                    setCreatorStatus(`Scanning library (Found ${info.count} playlists)...`);
+                    setLibraryScanProgress(2);
+                } else if (info.phase === 'gathering') {
+                    setCreatorStatus(`Reading playlist tracks (${info.processed} / ${info.total})...`);
+                    setLibraryScanProgress(2 + (info.processed / Math.max(1, info.total)) * 8);
+                }
+            }, lib, profile.id);
+
+            const sel = selectTracksFromCache(lib, { onlyMostRecentConsolidated: true });
+
+            if (!sel.sourcePlaylists.length) {
+                throw new Error("No consolidated playlists found. Please run Step 1 'Consolidate All Playlists' first.");
+            }
+            if (sel.daysOld != null && sel.daysOld > 30) {
+                throw new Error(`Your most recent consolidated playlists are from ${sel.mostRecentDate} (over a month ago). Please run Step 1 again to generate an up-to-date consolidation!`);
+            }
+
+            const totalTracksToFetch = sel.sourcePlaylists.reduce((sum, p) => sum + (p.tracks?.total || 0), 0);
+            setLibraryScanTracksTotalToFetch(totalTracksToFetch);
+            setLibraryScanTracksFetched(sel.trackUris.length);
+
+            setLibraryScanPhase('fetching_tracks');
+            setCreatorStatus(`Found ${sel.sourcePlaylists.length} recent consolidated playlist(s). ${sel.trackUris.length} unique songs.`);
+            setLibraryScanProgress(40);
+
+            const trackDetailsMap = new Map();
+            const uniqueArtistIds = new Set(sel.uniqueArtistIds);
+            for (const [uri, info] of sel.trackInfo) {
+                trackDetailsMap.set(uri, new Set(info.artistIds));
+            }
+
+            const artistIdsArray = Array.from(uniqueArtistIds);
+            if (artistIdsArray.length === 0) {
+                throw new Error('Could not find any artists in your consolidated playlists.');
+            }
+            
+            setLibraryScanPhase('fetching_genres');
+            setLibraryScanArtistsTotal(artistIdsArray.length);
+            setCreatorStatus(`Found ${artistIdsArray.length} unique artists. Fetching their specific genres...`);
+            
+            const artistToGenres = new Map();
+            const allSpecificGenres = new Set();
+            const batchSize = 50;
+
+            for (let i = 0; i < artistIdsArray.length; i += batchSize) {
+                const batch = artistIdsArray.slice(i, i + batchSize);
+                const response = await spotifyFetch(`/artists?ids=${batch.join(',')}`, { signal });
+                if (response.ok) {
+                    const data = await response.json();
+                    data.artists.forEach(artist => {
+                        if(artist && artist.genres) {
+                             artistToGenres.set(artist.id, artist.genres);
+                             artist.genres.forEach(g => allSpecificGenres.add(g));
+                        }
+                    });
+                }
+                const currentProcessed = Math.min(i + batch.length, artistIdsArray.length);
+                setLibraryScanArtistsProcessed(currentProcessed);
+                setLibraryScanProgress(40 + (currentProcessed / artistIdsArray.length) * 60);
+                await delay(50);
+            }
+
+            const trackDetails = Array.from(trackDetailsMap.entries()).map(([uri, artistsSet]) => ({
+                uri,
+                artistIds: Array.from(artistsSet)
+            }));
+
+            setCategoryFilterData({
+                tracks: trackDetails,
+                artistMap: artistToGenres
+            });
+            
+            setAvailableLibraryGenres(Array.from(allSpecificGenres).sort());
+            setLibraryScanProgress(100);
+            setCreatorStatus(`Scan complete! Found ${allSpecificGenres.size} unique genres matching your library. Select up to 3.`);
+
+        } catch (e) {
+            if (e.name === 'AbortError') {
+                setCreatorStatus('Library scan cancelled.');
+            } else {
+                setCreatorError(e.message);
+            }
+            console.error("Error scanning library for genres:", e);
+        } finally {
+            setIsLibraryScanLoading(false);
+            setLibraryScanProgress(0);
+            setLibraryScanPhase('');
+        }
+    }, [profile, spotifyFetch]);
+
+    const handleCreateLibraryFilterPlaylist = useCallback(async () => {
+        if (selectedLibraryGenres.length < 1) {
+            setCreatorError("Please select at least one genre.");
+            return;
+        }
+        if (!categoryFilterData) {
+            setCreatorError("Library data is missing. Please scan your consolidated songs again.");
+            return;
+        }
+    
+        const controller = new AbortController();
+        setLibraryScanAbortController(controller);
+        const signal = controller.signal;
+    
+        setIsLibraryScanLoading(true);
+        setCreatorError('');
+        setLibraryScanPhase('filtering_tracks');
+        setCreatorStatus(`Creating ${selectedLibraryGenres.length} separate playlists...`);
+        setLibraryScanTracksAdded(0);
+        setLibraryScanTracksTotal(0);
+    
+        try {
+            const lib = libraryCacheRef.current.library;
+            let totalAddedAcrossAll = 0;
+
+            for (const genre of selectedLibraryGenres) {
+                setLibraryScanPhase('filtering_tracks');
+                setCreatorStatus(`Filtering tracks for genre: ${genre}...`);
+                
+                const matchedTrackUris = new Set();
+
+                categoryFilterData.tracks.forEach(track => {
+                    const trackGenres = new Set();
+                    track.artistIds.forEach(artistId => {
+                        const artistGenres = categoryFilterData.artistMap.get(artistId) || [];
+                        artistGenres.forEach(cat => trackGenres.add(cat));
+                    });
+                    
+                    // Match ONLY the current genre in the loop
+                    if (trackGenres.has(genre)) {
+                        matchedTrackUris.add(track.uri);
+                    }
+                });
+
+                const finalTrackUris = Array.from(matchedTrackUris);
+
+                if(finalTrackUris.length === 0) {
+                    console.warn(`No songs found matching genre: ${genre}`);
+                    continue; 
+                }
+                
+                setLibraryScanPhase('creating_playlist');
+                setLibraryScanTracksTotal(prev => prev + finalTrackUris.length);
+                
+                // Capitalize the genre name for the playlist title
+                const capitalizedGenre = genre.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                const newPlaylistName = `Genre: ${capitalizedGenre}`;
+                
+                setCreatorStatus(`Creating playlist "${newPlaylistName}" with ${finalTrackUris.length} songs...`);
+                
+                const playlistResponse = await spotifyFetch(`/users/${profile.id}/playlists`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        name: newPlaylistName,
+                        description: `Filtered from library. Genre: ${genre}.`,
+                        public: false
+                    }),
+                    signal
+                });
+                const newPlaylist = await playlistResponse.json();
+        
+                setLibraryScanPhase('adding_tracks');
+                const chunkSize = 100;
+                
+                for (let i = 0; i < finalTrackUris.length; i += chunkSize) {
+                    const chunk = finalTrackUris.slice(i, i + chunkSize);
+                    await spotifyFetch(`/playlists/${newPlaylist.id}/tracks`, {
+                        method: 'POST',
+                        body: JSON.stringify({ uris: chunk }),
+                        signal
+                    });
+                    
+                    setLibraryScanTracksAdded(prev => prev + chunk.length);
+                    totalAddedAcrossAll += chunk.length;
+                    setLibraryScanProgress(((i + chunk.length) / finalTrackUris.length) * 100);
+                    await delay(100);
+                }
+        
+                addPlaylistToCache(lib, newPlaylist, finalTrackUris.map(uri => ({ uri })));
+            }
+            
+            setCreatorStatus(`Successfully created ${selectedLibraryGenres.length} playlists with ${totalAddedAcrossAll} total songs!`);
+            localStorage.removeItem('/me/playlists?limit=50');
+            setLibraryVersion(v => v + 1);
+            setSelectedLibraryGenres([]);
+            
+            // Clear local mapping data after successful creation
+            setCategoryFilterData(null);
+            setAvailableLibraryGenres([]);
+    
+        } catch (e) {
+            if (e.name === 'AbortError') {
+                setCreatorStatus("Playlist creation cancelled.");
+            } else {
+                setCreatorError(e.message);
+            }
+            console.error("Error creating filtered playlists:", e);
+        } finally {
+            setIsLibraryScanLoading(false);
+            setLibraryScanAbortController(null);
+            setLibraryScanProgress(0);
+            setLibraryScanPhase('');
+            setLibraryScanTracksAdded(0);
+            setLibraryScanTracksTotal(0);
+        }
+    }, [profile, spotifyFetch, selectedLibraryGenres, categoryFilterData, setLibraryVersion]);
+
+    const handleCancelLibraryScan = useCallback(() => {
+        libraryScanAbortController?.abort();
+    }, [libraryScanAbortController]);
+
+
     const handleCreateVibePlaylist = useCallback(async () => {
         if (!profile) { setCreatorError('Could not get user profile. Please try again.'); return; }
         if (!vibePlaylistName.trim()) { setCreatorError('Please enter a name for your Vibe playlist.'); return; }
@@ -783,7 +1037,7 @@ export default function App() {
                         }
                     },
                     cache.library,
-                    profile?.id
+                    profile.id
                 );
                 if (!trackUris.length) throw new Error('No tracks found in your source playlists.');
 
@@ -811,7 +1065,7 @@ export default function App() {
                 if (!candidateSpotifyIds.length) throw new Error('ReccoBeats returned no recommendations.');
 
                 setCreatorStatus('Loading your library to dedupe...');
-                const lib = await fetchVibeSourceTracks(resilientSpotifyFetch, signal, null, cache.library, profile?.id);
+                const lib = await fetchVibeSourceTracks(resilientSpotifyFetch, signal, null, cache.library, profile.id);
                 excludeUris = lib.excludeUris;
                 setVibeProgress(30);
             }
@@ -1103,7 +1357,6 @@ export default function App() {
 
             let tracksToScan = new Map(); 
 
-            // Get most recent consolidated regardless of mode to check 30-day rule
             const selConsolidated = selectTracksFromCache(lib, { onlyMostRecentConsolidated: true });
             
             if (!selConsolidated.sourcePlaylists.length || (selConsolidated.daysOld != null && selConsolidated.daysOld > 30)) {
@@ -1417,6 +1670,8 @@ export default function App() {
             isConsolidateLoading, consolidateProgress, handleConsolidatePlaylists, handleCancelConsolidate,
             consolidatePhase, consolidatePlaylistsFound, consolidatePlaylistsProcessed, consolidateTotalToProcess, consolidateTracksAdded,
             isGenreFusionLoading, genreFusionProgress, handleFetchAvailableGenres, handleCreateGenreFusionPlaylist, handleCancelGenreFusion, availableGenres, selectedGenres, setSelectedGenres, genreFusionName, setGenreFusionName,
+            isLibraryScanLoading, libraryScanProgress, libraryScanPhase, handleScanConsolidatedForGenres, handleCreateLibraryFilterPlaylist, handleCancelLibraryScan, availableLibraryGenres, selectedLibraryGenres, setSelectedLibraryGenres, libraryFilterName, setLibraryFilterName, categoryFilterData,
+            libraryScanTracksTotalToFetch, libraryScanTracksFetched, libraryScanArtistsTotal, libraryScanArtistsProcessed, libraryScanTracksAdded, libraryScanTracksTotal,
             isVibeLoading, vibeProgress, vibePhase, vibeMode, setVibeMode, vibeRanges, setVibeRanges, vibePlaylistName, setVibePlaylistName, vibeTargetCount, setVibeTargetCount, handleCreateVibePlaylist, handleCancelVibePlaylist,
             genreEngineMode, setGenreEngineMode, isGenreEngineScanning, genreEngineProgress, genreEngineEta, scannedGenreMap, setScannedGenreMap, selectedEngineGenres, setSelectedEngineGenres, isGenreEngineCreating, leftoverUris, setLeftoverUris, handleScanLibraryForGenres, handleCreateEnginePlaylists,
             getYesterdayDateParts, handleClearCache, 
@@ -1925,12 +2180,14 @@ function PlaylistCreator() {
         isConsolidateLoading, consolidateProgress, handleConsolidatePlaylists, handleCancelConsolidate,
         consolidatePhase, consolidatePlaylistsFound, consolidatePlaylistsProcessed, consolidateTotalToProcess, consolidateTracksAdded,
         isGenreFusionLoading, genreFusionProgress, handleFetchAvailableGenres, handleCreateGenreFusionPlaylist, handleCancelGenreFusion, availableGenres, selectedGenres, setSelectedGenres, genreFusionName, setGenreFusionName,
+        isLibraryScanLoading, libraryScanProgress, libraryScanPhase, handleScanConsolidatedForGenres, handleCreateLibraryFilterPlaylist, handleCancelLibraryScan, availableLibraryGenres, selectedLibraryGenres, setSelectedLibraryGenres, libraryFilterName, setLibraryFilterName, categoryFilterData,
+        libraryScanTracksTotalToFetch, libraryScanTracksFetched, libraryScanArtistsTotal, libraryScanArtistsProcessed, libraryScanTracksAdded, libraryScanTracksTotal,
         isVibeLoading, vibeProgress, vibePhase, vibeMode, setVibeMode, vibeRanges, setVibeRanges, vibePlaylistName, setVibePlaylistName, vibeTargetCount, setVibeTargetCount, handleCreateVibePlaylist, handleCancelVibePlaylist,
         genreEngineMode, setGenreEngineMode, isGenreEngineScanning, genreEngineProgress, genreEngineEta, scannedGenreMap, setScannedGenreMap, selectedEngineGenres, setSelectedEngineGenres, isGenreEngineCreating, leftoverUris, setLeftoverUris, handleScanLibraryForGenres, handleCreateEnginePlaylists,
         getYesterdayDateParts, handleClearCache, showCreatorStatus, setShowCreatorStatus, fadeCreatorStatusOut
     } = useContext(AppContext);
 
-    const isAnyCurationLoading = isWqxrLoading || isCustomLoading || isTopTracksLoading || isConsolidateLoading || isGenreFusionLoading || isVibeLoading || isGenreEngineScanning || isGenreEngineCreating;
+    const isAnyCurationLoading = isWqxrLoading || isCustomLoading || isTopTracksLoading || isConsolidateLoading || isGenreFusionLoading || isLibraryScanLoading || isVibeLoading || isGenreEngineScanning || isGenreEngineCreating;
     const { year: yesterdayYear, month: yesterdayMonth, day: yesterdayDay } = getYesterdayDateParts();
 
     const handleGenreSelect = (genre) => {
@@ -1939,6 +2196,13 @@ function PlaylistCreator() {
         );
     };
 
+    const handleLibraryGenreSelect = (genre) => {
+        setSelectedLibraryGenres(prev => 
+            prev.includes(genre) ? prev.filter(g => g !== genre) : [...prev, genre]
+        );
+    };
+
+    
     return (
         <div>
             <div className="flex justify-between items-center mb-4">
@@ -1986,11 +2250,12 @@ function PlaylistCreator() {
                 <div className="bg-gray-800 p-6 rounded-lg border border-white">
                     <h2 className="text-xl font-semibold mb-2">Consolidate Your Playlists</h2>
                     <p className="text-gray-400 mb-4">
-                        Consolidate your songs into one seamless list with no duplicates.
+                        Consolidate your songs into one seamless list with no duplicates. Once consolidated, you have the option to scan those specific songs and automatically generate new playlists based on specific genres!
                     </p>
 
+                    {/* Step 1: Consolidate */}
                     <div className="mb-6 p-4 bg-gray-900 rounded-md border border-gray-700">
-                        <h3 className="font-semibold text-white mb-2">Consolidate All Songs</h3>
+                        <h3 className="font-semibold text-white mb-2">Step 1: Consolidate All Songs</h3>
                         <p className="text-sm text-gray-400 mb-4">
                             Scans your entire library (excluding any previously consolidated lists) and creates "All My Playlists Songs" with zero duplicates.
                         </p>
@@ -2055,11 +2320,122 @@ function PlaylistCreator() {
                             </div>
                         )}
                     </div>
+
+                    {/* Step 2: Library Genre Filter */}
+                    <div className="p-4 bg-gray-900 rounded-md border border-gray-700">
+                        <h3 className="font-semibold text-white mb-2">Step 2: Filter Consolidated Library by Genre</h3>
+                        <p className="text-sm text-gray-400 mb-4">
+                            Scans your "All My Playlists Songs" to identify all the exact genres (like Tejano, EDM, Rock) associated with your artists. Filter your songs into a highly specific playlist.
+                        </p>
+                        <button
+                            onClick={handleScanConsolidatedForGenres}
+                            disabled={isAnyCurationLoading}
+                            className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
+                        >
+                            {isLibraryScanLoading && libraryScanPhase !== 'filtering_tracks' && libraryScanPhase !== 'creating_playlist' && libraryScanPhase !== 'adding_tracks' ? 'Scanning...' : "Scan Consolidated Songs for Genres"}
+                        </button>
+                        
+                        {isLibraryScanLoading && libraryScanPhase !== 'filtering_tracks' && libraryScanPhase !== 'creating_playlist' && libraryScanPhase !== 'adding_tracks' && (
+                            <button
+                                onClick={handleCancelLibraryScan}
+                                className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
+                            >
+                                Cancel
+                            </button>
+                        )}
+                        
+                        {isLibraryScanLoading && (
+                            <div className="mt-4 bg-gray-900 p-4 rounded-md space-y-4">
+                                <div>
+                                    <div className="flex justify-between text-xs text-gray-400 mb-1">
+                                        <span>Overall Progress</span>
+                                        <span>{Math.round(libraryScanProgress)}%</span>
+                                    </div>
+                                    <div className="w-full bg-gray-700 rounded-full h-2">
+                                        <div className="bg-blue-500 h-2 rounded-full transition-all duration-300" style={{ width: `${libraryScanProgress}%` }}></div>
+                                    </div>
+                                </div>
+
+                                {(libraryScanPhase === 'fetching_playlists' || libraryScanTracksTotalToFetch > 0) && (
+                                    <div>
+                                        <p className="text-xs text-gray-400 mb-1">
+                                            Step 1: Extracting Songs ({libraryScanTracksFetched} / {libraryScanTracksTotalToFetch} songs extracted)
+                                        </p>
+                                        <div className="w-full bg-gray-700 rounded-full h-1.5">
+                                            <div className={`h-1.5 rounded-full transition-all duration-300 ${libraryScanPhase === 'fetching_tracks' || libraryScanPhase === 'fetching_playlists' ? 'bg-blue-400' : 'bg-green-500'}`} style={{ width: libraryScanTracksTotalToFetch > 0 ? `${(libraryScanTracksFetched / libraryScanTracksTotalToFetch) * 100}%` : '0%' }}></div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {(libraryScanPhase === 'fetching_genres' || libraryScanPhase === 'mapping_categories' || libraryScanArtistsTotal > 0) && (
+                                    <div>
+                                        <p className="text-xs text-gray-400 mb-1">
+                                            Step 2: Fetching Genres ({libraryScanArtistsProcessed} / {libraryScanArtistsTotal} artists processed)
+                                        </p>
+                                        <div className="w-full bg-gray-700 rounded-full h-1.5">
+                                            <div className={`h-1.5 rounded-full transition-all duration-300 ${libraryScanPhase === 'fetching_genres' ? 'bg-blue-400' : 'bg-green-500'}`} style={{ width: libraryScanArtistsTotal > 0 ? `${(libraryScanArtistsProcessed / libraryScanArtistsTotal) * 100}%` : '0%' }}></div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {(libraryScanPhase === 'filtering_tracks' || libraryScanPhase === 'creating_playlist' || libraryScanPhase === 'adding_tracks') && (
+                                    <div>
+                                        <p className="text-xs text-gray-400 mb-1">
+                                            Step 3: Populating Target Playlist ({libraryScanTracksAdded} / {libraryScanTracksTotal} songs added)
+                                        </p>
+                                        <div className="w-full bg-gray-700 rounded-full h-1.5">
+                                            <div className={`h-1.5 rounded-full transition-all duration-300 ${libraryScanPhase === 'adding_tracks' ? 'bg-blue-400' : (libraryScanTracksTotal > 0 && libraryScanTracksAdded === libraryScanTracksTotal ? 'bg-green-500' : 'bg-blue-400')}`} style={{ width: libraryScanTracksTotal > 0 ? `${(libraryScanTracksAdded / libraryScanTracksTotal) * 100}%` : '0%' }}></div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {availableLibraryGenres.length > 0 && !isLibraryScanLoading && (
+                            <div className="mt-6 border-t border-gray-700 pt-4">
+                                <h3 className="text-lg font-semibold mb-2">Genres Found in your Consolidated Songs:</h3>
+                                <div className="flex flex-wrap gap-2 max-h-72 overflow-y-auto p-2 bg-gray-800 rounded-md">
+                                    {availableLibraryGenres.map(genre => (
+                                        <button
+                                            key={genre}
+                                            onClick={() => handleLibraryGenreSelect(genre)}
+                                            className={`px-3 py-1 text-sm rounded-full transition-colors ${selectedLibraryGenres.includes(genre) ? 'bg-blue-500 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+                                        >
+                                            {genre}
+                                        </button>
+                                    ))}
+                                </div>
+
+                                {selectedLibraryGenres.length > 0 && (
+                                    <div className="mt-4">
+                                         <h3 className="text-lg font-semibold mb-2">Selected Genres to Create Playlists For:</h3>
+                                         <p className="text-gray-400 italic mb-4">{selectedLibraryGenres.join(', ')}</p>
+                                         <p className="text-sm text-gray-300 mb-4">This will generate {selectedLibraryGenres.length} separate playlist(s).</p>
+                                         <button
+                                            onClick={handleCreateLibraryFilterPlaylist}
+                                            disabled={isAnyCurationLoading || selectedLibraryGenres.length < 1}
+                                            className="mt-4 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
+                                        >
+                                            {isLibraryScanLoading && (libraryScanPhase === 'filtering_tracks' || libraryScanPhase === 'creating_playlist' || libraryScanPhase === 'adding_tracks') ? 'Creating...' : `Create ${selectedLibraryGenres.length} Playlist(s)`}
+                                        </button>
+                                         {isLibraryScanLoading && (libraryScanPhase === 'filtering_tracks' || libraryScanPhase === 'creating_playlist' || libraryScanPhase === 'adding_tracks') && (
+                                            <button
+                                                onClick={handleCancelLibraryScan}
+                                                className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-full hover:bg-red-700"
+                                            >
+                                                Cancel
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
                 </div>
 
                 {/* --- ADVANCED GENRE PLAYLIST ENGINE --- */}
                 <div className="bg-gray-800 p-6 rounded-lg border border-white">
-                    <h2 className="text-xl font-semibold mb-2">Create & Update Genre Playlists</h2>
+                    <h2 className="text-xl font-semibold mb-2">Create & Update Genre Playlists (Powered by Last.fm)</h2>
                     <p className="text-gray-400 mb-4">
                         Scans your tracks, grabs the primary genre from Last.fm, and lets you build or update dedicated genre playlists. Leftover songs automatically go into a dated leftover list.
                     </p>
