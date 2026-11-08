@@ -1014,12 +1014,8 @@ export default function App() {
     }, [profile, spotifyFetch]);
 
     const handleCreateLibraryFilterPlaylist = useCallback(async () => {
-        if (selectedLibraryGenres.length < 1 || selectedLibraryGenres.length > 3) {
-            setCreatorError("Please select between 1 and 3 genres.");
-            return;
-        }
-        if (!libraryFilterName.trim()) {
-            setCreatorError("Please enter a name for your genre playlist.");
+        if (selectedLibraryGenres.length < 1) {
+            setCreatorError("Please select at least one genre.");
             return;
         }
         if (!categoryFilterData) {
@@ -1034,73 +1030,86 @@ export default function App() {
         setIsLibraryScanLoading(true);
         setCreatorError('');
         setLibraryScanPhase('filtering_tracks');
-        setCreatorStatus('Filtering your consolidated library to find exact genre matches...');
+        setCreatorStatus(`Creating ${selectedLibraryGenres.length} separate playlists...`);
         setLibraryScanTracksAdded(0);
         setLibraryScanTracksTotal(0);
     
         try {
-            const matchedTrackUris = new Set();
+            const lib = libraryCacheRef.current.library;
+            let totalAddedAcrossAll = 0;
 
-            categoryFilterData.tracks.forEach(track => {
-                const trackGenres = new Set();
-                track.artistIds.forEach(artistId => {
-                    const artistGenres = categoryFilterData.artistMap.get(artistId) || [];
-                    artistGenres.forEach(cat => trackGenres.add(cat));
+            for (const genre of selectedLibraryGenres) {
+                setLibraryScanPhase('filtering_tracks');
+                setCreatorStatus(`Filtering tracks for genre: ${genre}...`);
+                
+                const matchedTrackUris = new Set();
+
+                categoryFilterData.tracks.forEach(track => {
+                    const trackGenres = new Set();
+                    track.artistIds.forEach(artistId => {
+                        const artistGenres = categoryFilterData.artistMap.get(artistId) || [];
+                        artistGenres.forEach(cat => trackGenres.add(cat));
+                    });
+                    
+                    // Match ONLY the current genre in the loop
+                    if (trackGenres.has(genre)) {
+                        matchedTrackUris.add(track.uri);
+                    }
                 });
-                
-                const matchesAllSelected = selectedLibraryGenres.every(g => trackGenres.has(g));
-                
-                if (matchesAllSelected) {
-                    matchedTrackUris.add(track.uri);
+
+                const finalTrackUris = Array.from(matchedTrackUris);
+
+                if(finalTrackUris.length === 0) {
+                    console.warn(`No songs found matching genre: ${genre}`);
+                    continue; 
                 }
-            });
-
-            const finalTrackUris = Array.from(matchedTrackUris);
-
-            if(finalTrackUris.length === 0) {
-                throw new Error(`No songs found in your library matching all of these genres combined: ${selectedLibraryGenres.join(' + ')}`);
-            }
-            
-            setLibraryScanPhase('creating_playlist');
-            setLibraryScanTracksTotal(finalTrackUris.length);
-            setCreatorStatus(`Found ${finalTrackUris.length} matching songs. Creating playlist "${libraryFilterName}"...`);
-            
-            const playlistResponse = await spotifyFetch(`/users/${profile.id}/playlists`, {
-                method: 'POST',
-                body: JSON.stringify({
-                    name: libraryFilterName,
-                    description: `Filtered from library. Songs matching: ${selectedLibraryGenres.join(' + ')}.`,
-                    public: false
-                }),
-                signal
-            });
-            const newPlaylist = await playlistResponse.json();
-    
-            setLibraryScanPhase('adding_tracks');
-            const chunkSize = 100;
-            
-            for (let i = 0; i < finalTrackUris.length; i += chunkSize) {
-                const chunk = finalTrackUris.slice(i, i + chunkSize);
-                await spotifyFetch(`/playlists/${newPlaylist.id}/tracks`, {
+                
+                setLibraryScanPhase('creating_playlist');
+                setLibraryScanTracksTotal(prev => prev + finalTrackUris.length);
+                
+                // Capitalize the genre name for the playlist title
+                const capitalizedGenre = genre.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                const newPlaylistName = `Genre: ${capitalizedGenre}`;
+                
+                setCreatorStatus(`Creating playlist "${newPlaylistName}" with ${finalTrackUris.length} songs...`);
+                
+                const playlistResponse = await spotifyFetch(`/users/${profile.id}/playlists`, {
                     method: 'POST',
-                    body: JSON.stringify({ uris: chunk }),
+                    body: JSON.stringify({
+                        name: newPlaylistName,
+                        description: `Filtered from library. Genre: ${genre}.`,
+                        public: false
+                    }),
                     signal
                 });
+                const newPlaylist = await playlistResponse.json();
+        
+                setLibraryScanPhase('adding_tracks');
+                const chunkSize = 100;
                 
-                setLibraryScanTracksAdded(prev => prev + chunk.length);
-                setLibraryScanProgress(((i + chunk.length) / finalTrackUris.length) * 100);
-                setCreatorStatus(`Adding songs to playlist (${Math.floor((i + chunk.length) / finalTrackUris.length * 100)}%)...`);
-                await delay(100);
+                for (let i = 0; i < finalTrackUris.length; i += chunkSize) {
+                    const chunk = finalTrackUris.slice(i, i + chunkSize);
+                    await spotifyFetch(`/playlists/${newPlaylist.id}/tracks`, {
+                        method: 'POST',
+                        body: JSON.stringify({ uris: chunk }),
+                        signal
+                    });
+                    
+                    setLibraryScanTracksAdded(prev => prev + chunk.length);
+                    totalAddedAcrossAll += chunk.length;
+                    setLibraryScanProgress(((i + chunk.length) / finalTrackUris.length) * 100);
+                    await delay(100);
+                }
+        
+                addPlaylistToCache(lib, newPlaylist, finalTrackUris.map(uri => ({ uri })));
             }
-    
-            setCreatedPlaylist({ ...newPlaylist, _sourceMode: 'existing' });
-            setCreatorStatus("Filtered genre playlist created successfully!");
-            addPlaylistToCache(libraryCacheRef.current.library, newPlaylist, finalTrackUris.map(uri => ({ uri })));
+            
+            setCreatorStatus(`Successfully created ${selectedLibraryGenres.length} playlists with ${totalAddedAcrossAll} total songs!`);
             localStorage.removeItem('/me/playlists?limit=50');
             setLibraryVersion(v => v + 1);
             setSelectedLibraryGenres([]);
-            setLibraryFilterName("");
             
+            // Clear local mapping data after successful creation
             setCategoryFilterData(null);
             setAvailableLibraryGenres([]);
     
@@ -1110,7 +1119,7 @@ export default function App() {
             } else {
                 setCreatorError(e.message);
             }
-            console.error("Error creating filtered playlist:", e);
+            console.error("Error creating filtered playlists:", e);
         } finally {
             setIsLibraryScanLoading(false);
             setLibraryScanAbortController(null);
@@ -1119,7 +1128,7 @@ export default function App() {
             setLibraryScanTracksAdded(0);
             setLibraryScanTracksTotal(0);
         }
-    }, [profile, spotifyFetch, selectedLibraryGenres, libraryFilterName, categoryFilterData, setLibraryVersion]);
+    }, [profile, spotifyFetch, selectedLibraryGenres, categoryFilterData, setLibraryVersion]);
 
     const handleCancelLibraryScan = useCallback(() => {
         libraryScanAbortController?.abort();
@@ -1386,6 +1395,10 @@ export default function App() {
                         const primaryGenre = genres[0]; 
                         if (!genreMap.has(primaryGenre)) genreMap.set(primaryGenre, new Set());
                         genreMap.get(primaryGenre).add(track.uri);
+                    } else {
+                        // Catch tracks that Last.fm has absolutely no data for
+                        if (!genreMap.has("unknown")) genreMap.set("unknown", new Set());
+                        genreMap.get("unknown").add(track.uri);
                     }
                 }
 
@@ -2162,7 +2175,7 @@ function PlaylistCreator() {
 
     const handleLibraryGenreSelect = (genre) => {
         setSelectedLibraryGenres(prev => 
-            prev.includes(genre) ? prev.filter(g => g !== genre) : (prev.length < 3 ? [...prev, genre] : prev)
+            prev.includes(genre) ? prev.filter(g => g !== genre) : [...prev, genre]
         );
     };
 
@@ -2353,8 +2366,7 @@ function PlaylistCreator() {
                                         <button
                                             key={genre}
                                             onClick={() => handleLibraryGenreSelect(genre)}
-                                            disabled={!selectedLibraryGenres.includes(genre) && selectedLibraryGenres.length >= 3}
-                                            className={`px-3 py-1 text-sm rounded-full transition-colors ${selectedLibraryGenres.includes(genre) ? 'bg-blue-500 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'} ${!selectedLibraryGenres.includes(genre) && selectedLibraryGenres.length >= 3 ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                            className={`px-3 py-1 text-sm rounded-full transition-colors ${selectedLibraryGenres.includes(genre) ? 'bg-blue-500 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
                                         >
                                             {genre}
                                         </button>
@@ -2363,18 +2375,15 @@ function PlaylistCreator() {
 
                                 {selectedLibraryGenres.length > 0 && (
                                     <div className="mt-4">
-                                         <h3 className="text-lg font-semibold mb-2">Selected Genres for Playlist (Songs must contain ALL selected):</h3>
-                                         <p className="text-gray-400 italic mb-4">{selectedLibraryGenres.join(' + ')}</p>
-                                         <div>
-                                            <label className="block mb-1 text-sm font-medium text-gray-300">Playlist Name</label>
-                                            <input type="text" value={libraryFilterName} onChange={e => setLibraryFilterName(e.target.value)} placeholder="My Genre Filtered Playlist" className="w-full p-2 bg-gray-700 rounded-md border-gray-600" />
-                                         </div>
+                                         <h3 className="text-lg font-semibold mb-2">Selected Genres to Create Playlists For:</h3>
+                                         <p className="text-gray-400 italic mb-4">{selectedLibraryGenres.join(', ')}</p>
+                                         <p className="text-sm text-gray-300 mb-4">This will generate {selectedLibraryGenres.length} separate playlist(s).</p>
                                          <button
                                             onClick={handleCreateLibraryFilterPlaylist}
-                                            disabled={isAnyCurationLoading || selectedLibraryGenres.length < 1 || selectedLibraryGenres.length > 3}
+                                            disabled={isAnyCurationLoading || selectedLibraryGenres.length < 1}
                                             className="mt-4 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 text-white font-bold py-2 px-6 rounded-full"
                                         >
-                                            {isLibraryScanLoading && (libraryScanPhase === 'filtering_tracks' || libraryScanPhase === 'creating_playlist' || libraryScanPhase === 'adding_tracks') ? 'Creating...' : 'Create Filtered Playlist'}
+                                            {isLibraryScanLoading && (libraryScanPhase === 'filtering_tracks' || libraryScanPhase === 'creating_playlist' || libraryScanPhase === 'adding_tracks') ? 'Creating...' : `Create ${selectedLibraryGenres.length} Playlist(s)`}
                                         </button>
                                          {isLibraryScanLoading && (libraryScanPhase === 'filtering_tracks' || libraryScanPhase === 'creating_playlist' || libraryScanPhase === 'adding_tracks') && (
                                             <button
