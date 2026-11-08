@@ -189,6 +189,7 @@ export default function App() {
     const [scannedGenreMap, setScannedGenreMap] = useState(null);
     const [selectedEngineGenres, setSelectedEngineGenres] = useState([]);
     const [isGenreEngineCreating, setIsGenreEngineCreating] = useState(false);
+    const [leftoverUris, setLeftoverUris] = useState([]);
 
     const libraryCacheRef = useRef(createLibraryCache());
 
@@ -1080,7 +1081,7 @@ export default function App() {
             const lib = libraryCacheRef.current.library;
             await populateLibraryCache(resilientSpotifyFetch, null, (info) => {
                 if (info.phase === 'listing') setCreatorStatus(`Scanning library (Found ${info.count} playlists)...`);
-            }, lib, profile.id);
+            }, lib, profile?.id);
 
             let tracksToScan = new Map(); 
 
@@ -1459,7 +1460,7 @@ function Sidebar() {
                     <p className="p-4 text-gray-400">Loading playlists...</p>
                 ) : (
                     <ul className="space-y-1">
-                        {playlists?.items.map(playlist => (
+                        {playlists?.items?.map(playlist => (
                             <li key={playlist.id} className={`group flex justify-between items-center text-gray-400 hover:text-white p-2 rounded-md cursor-pointer text-sm ${selectedPlaylistId === playlist.id ? 'bg-gray-800 !text-white' : ''}`}>
                                 <span onClick={() => handlePlaylistClick(playlist.id)} className="truncate flex-1">{playlist.name}</span>
                                 {profile?.id === playlist.owner.id && (
@@ -1520,7 +1521,7 @@ function RightSidebar() {
         <aside className="w-80 bg-black p-2 flex-shrink-0 hidden lg:flex flex-col">
             <div className="bg-[#121212] rounded-lg p-4">
                 <h2 className="font-bold text-white mb-4">Now Playing</h2>
-                 <img src={currentTrack.album.images[0]?.url} alt="Album Art" className="w-full rounded-md mb-4"/>
+                 <img src={currentTrack.album?.images?.[0]?.url} alt="Album Art" className="w-full rounded-md mb-4"/>
                 <div className="flex justify-between items-center">
                     <div>
                         <h3 className="font-bold text-white">{currentTrack.name}</h3>
@@ -1606,7 +1607,7 @@ function PlayerBar() {
     return (
         <footer className="h-24 bg-black border-t border-gray-800 flex items-center justify-between px-4 text-white">
             <div className="w-1/4 flex items-center gap-3">
-                <img src={currentTrack.album.images[0]?.url} alt="" className="w-14 h-14"/>
+                <img src={currentTrack.album?.images?.[0]?.url} alt="" className="w-14 h-14"/>
                 <div>
                     <p className="font-semibold">{currentTrack.name}</p>
                     <p className="text-xs text-gray-400">{currentTrack.artists.map(a => a.name).join(', ')}</p>
@@ -1776,9 +1777,9 @@ function HomePage() {
             
             <ContentSection title="Recently Played" loading={recentLoading} error={recentError}>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {recent?.items.map(({ track }, index) => (
+                    {recent?.items?.map(({ track }, index) => (
                        <div key={`${track.id}-${index}`} className="bg-white/10 hover:bg-white/20 transition-colors duration-300 rounded-md flex items-center gap-4 group cursor-pointer overflow-hidden">
-                            <img src={track.album.images[0]?.url || 'https://placehold.co/80x80/181818/FFFFFF?text=...'} alt={track.name} className="w-20 h-20 flex-shrink-0"/>
+                            <img src={track.album?.images?.[0]?.url || 'https://placehold.co/80x80/181818/FFFFFF?text=...'} alt={track.name} className="w-20 h-20 flex-shrink-0"/>
                             <p className="font-semibold text-white flex-1 pr-2">{track.name}</p>
                             <div className="mr-4 w-12 h-12 bg-green-500 rounded-full items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 shadow-xl hidden sm:flex">
                                <svg className="w-6 h-6 text-black" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
@@ -1790,10 +1791,10 @@ function HomePage() {
 
             <ContentSection title="Your Top Artists" loading={artistsLoading} error={artistsError}>
                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
-                    {topArtists?.items.map(artist => (
+                    {topArtists?.items?.map(artist => (
                        <PlaylistCard
                             key={artist.id}
-                            imageUrl={artist.images[0]?.url}
+                            imageUrl={artist.images?.[0]?.url}
                             title={artist.name}
                             subtitle="Artist"
                             isArtist={true}
@@ -1847,7 +1848,7 @@ function PlaylistView({ playlistId }) {
                     <p className="text-sm font-bold">Playlist</p>
                     <h1 className="text-5xl font-extrabold">{playlist.name}</h1>
                     <p className="text-gray-300 mt-2" dangerouslySetInnerHTML={{ __html: playlist.description }} />
-                    {playlist.tracks.total > 100 && <p className="text-xs text-gray-400 mt-2">Note: Displaying the first 100 songs from this playlist.</p>}
+                    {playlist.tracks?.total > 100 && <p className="text-xs text-gray-400 mt-2">Note: Displaying the first 100 songs from this playlist.</p>}
                 </div>
             </header>
             
@@ -1877,7 +1878,7 @@ function PlaylistView({ playlistId }) {
                                    }
                                 </div>
                                 <div className="flex items-center gap-4">
-                                    <img src={track.album.images[2]?.url || 'https://placehold.co/40x40/181818/FFFFFF?text=...'} alt={track.name} className="w-10 h-10"/>
+                                    <img src={track.album?.images?.[2]?.url || 'https://placehold.co/40x40/181818/FFFFFF?text=...'} alt={track.name} className="w-10 h-10"/>
                                     <div>
                                         <p className={`font-semibold ${isPlaying ? 'text-green-500' : 'text-white'}`}>{track.name}</p>
                                         <p className="text-sm text-gray-400">{track.artists.map(a => a.name).join(', ')}</p>
@@ -2468,9 +2469,9 @@ function SearchView() {
             
             {results && (
                 <div className="space-y-10">
-                   {results.tracks?.items.length > 0 && <TrackResults tracks={results.tracks.items} />}
-                   {results.artists?.items.length > 0 && <ArtistResults artists={results.artists.items} />}
-                   {results.albums?.items.length > 0 && <AlbumResults albums={results.albums.items} />}
+                   {results.tracks?.items?.length > 0 && <TrackResults tracks={results.tracks.items} />}
+                   {results.artists?.items?.length > 0 && <ArtistResults artists={results.artists.items} />}
+                   {results.albums?.items?.length > 0 && <AlbumResults albums={results.albums.items} />}
                 </div>
             )}
         </div>
@@ -2488,7 +2489,7 @@ function TrackResults({ tracks }) {
            <ContentSection title="Songs">
             {tracks.map(track => (
                 <div key={track.id} onDoubleClick={() => playTrack(track.uri)} className="grid grid-cols-[auto,1fr,auto] items-center gap-4 p-2 rounded-md hover:bg-white/10 group">
-                    <img src={track.album.images[2]?.url || 'https://placehold.co/40x40/181818/FFFFFF?text=...'} alt={track.name} className="w-10 h-10"/>
+                    <img src={track.album?.images?.[2]?.url || 'https://placehold.co/40x40/181818/FFFFFF?text=...'} alt={track.name} className="w-10 h-10"/>
                     <div>
                         <p className="font-semibold text-white">{track.name}</p>
                         <p className="text-sm text-gray-400">{track.artists.map(a => a.name).join(', ')}</p>
@@ -2505,7 +2506,7 @@ function ArtistResults({ artists }) {
         <ContentSection title="Artists">
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
                 {artists.map(artist => (
-                    <PlaylistCard key={artist.id} imageUrl={artist.images[0]?.url} title={artist.name} subtitle="Artist" isArtist={true} />
+                    <PlaylistCard key={artist.id} imageUrl={artist.images?.[0]?.url} title={artist.name} subtitle="Artist" isArtist={true} />
                 ))}
             </div>
         </ContentSection>
@@ -2517,7 +2518,7 @@ function AlbumResults({ albums }) {
         <ContentSection title="Albums">
              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
                 {albums.map(album => (
-                    <PlaylistCard key={album.id} imageUrl={album.images[0]?.url} title={album.name} subtitle={album.artists.map(a => a.name).join(', ')} />
+                    <PlaylistCard key={album.id} imageUrl={album.images?.[0]?.url} title={album.name} subtitle={album.artists.map(a => a.name).join(', ')} />
                 ))}
             </div>
         </ContentSection>
