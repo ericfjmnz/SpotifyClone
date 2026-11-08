@@ -266,12 +266,30 @@ export default function App() {
         return { year, month, day };
     }, []);
 
+    const delay = (ms) => new Promise(res => setTimeout(res, ms));
+
+    const handleClearCache = useCallback(() => {
+        // Reset the in-memory ref
+        libraryCacheRef.current = createLibraryCache();
+        
+        // Clear all cached playlist data from localStorage
+        const keysToRemove = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && (key.startsWith('/me/playlists') || key.startsWith('/playlists/'))) {
+                keysToRemove.push(key);
+            }
+        }
+        keysToRemove.forEach(key => localStorage.removeItem(key));
+        
+        setCreatorStatus('Library cache cleared successfully. Next scan will pull fresh data from Spotify.');
+        setTimeout(() => setShowCreatorStatus(false), 5000);
+    }, []);
+
     const resetCustomForm = useCallback(() => {
         setCustomPlaylistName('');
         setAiPrompt('');
     }, []);
-
-    const delay = (ms) => new Promise(res => setTimeout(res, ms));
 
     const handleCreateWQXRPlaylist = useCallback(async () => {
         if(!profile) {
@@ -1401,7 +1419,7 @@ export default function App() {
             isGenreFusionLoading, genreFusionProgress, handleFetchAvailableGenres, handleCreateGenreFusionPlaylist, handleCancelGenreFusion, availableGenres, selectedGenres, setSelectedGenres, genreFusionName, setGenreFusionName,
             isVibeLoading, vibeProgress, vibePhase, vibeMode, setVibeMode, vibeRanges, setVibeRanges, vibePlaylistName, setVibePlaylistName, vibeTargetCount, setVibeTargetCount, handleCreateVibePlaylist, handleCancelVibePlaylist,
             genreEngineMode, setGenreEngineMode, isGenreEngineScanning, genreEngineProgress, genreEngineEta, scannedGenreMap, setScannedGenreMap, selectedEngineGenres, setSelectedEngineGenres, isGenreEngineCreating, leftoverUris, setLeftoverUris, handleScanLibraryForGenres, handleCreateEnginePlaylists,
-            getYesterdayDateParts, 
+            getYesterdayDateParts, handleClearCache, 
             spotifyFetch
         }}>
             <div className="h-screen w-full flex flex-col bg-black text-white font-sans">
@@ -1909,7 +1927,7 @@ function PlaylistCreator() {
         isGenreFusionLoading, genreFusionProgress, handleFetchAvailableGenres, handleCreateGenreFusionPlaylist, handleCancelGenreFusion, availableGenres, selectedGenres, setSelectedGenres, genreFusionName, setGenreFusionName,
         isVibeLoading, vibeProgress, vibePhase, vibeMode, setVibeMode, vibeRanges, setVibeRanges, vibePlaylistName, setVibePlaylistName, vibeTargetCount, setVibeTargetCount, handleCreateVibePlaylist, handleCancelVibePlaylist,
         genreEngineMode, setGenreEngineMode, isGenreEngineScanning, genreEngineProgress, genreEngineEta, scannedGenreMap, setScannedGenreMap, selectedEngineGenres, setSelectedEngineGenres, isGenreEngineCreating, leftoverUris, setLeftoverUris, handleScanLibraryForGenres, handleCreateEnginePlaylists,
-        getYesterdayDateParts, showCreatorStatus, setShowCreatorStatus, fadeCreatorStatusOut
+        getYesterdayDateParts, handleClearCache, showCreatorStatus, setShowCreatorStatus, fadeCreatorStatusOut
     } = useContext(AppContext);
 
     const isAnyCurationLoading = isWqxrLoading || isCustomLoading || isTopTracksLoading || isConsolidateLoading || isGenreFusionLoading || isVibeLoading || isGenreEngineScanning || isGenreEngineCreating;
@@ -1923,7 +1941,16 @@ function PlaylistCreator() {
 
     return (
         <div>
-            <h1 className="text-3xl font-bold mb-4">Playlist Creator</h1>
+            <div className="flex justify-between items-center mb-4">
+                <h1 className="text-3xl font-bold">Playlist Creator</h1>
+                <button
+                    onClick={handleClearCache}
+                    disabled={isAnyCurationLoading}
+                    className="px-4 py-2 text-sm font-medium text-gray-300 bg-gray-800 border border-gray-600 rounded-md hover:bg-gray-700 hover:text-white disabled:opacity-50 transition-colors"
+                >
+                    Clear Library Cache
+                </button>
+            </div>
             
             <div className="sticky top-0 z-10 bg-gray-800/95 backdrop-blur-sm py-3 mb-4">
                 {showCreatorStatus && (creatorError || creatorStatus) && (
